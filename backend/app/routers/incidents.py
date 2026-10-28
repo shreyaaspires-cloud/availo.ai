@@ -26,6 +26,8 @@ async def get_incident_damage_assessment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    await get_booking_participant(booking_id, current_user, db)
     result = await db.execute(
         select(IncidentReport)
         .options(selectinload(IncidentReport.assessments))
@@ -44,5 +46,9 @@ async def submit_closeup_photo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    booking = await get_booking_participant(booking_id, current_user, db)
+    if booking.user_id != current_user.id and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=403, detail="Only the booking user can submit close-up photos")
     await damage_service.submit_closeup(booking_id, body.angle.value, body.image_url, db)
     return {"message": "Closeup image saved"}

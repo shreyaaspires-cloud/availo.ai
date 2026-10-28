@@ -38,6 +38,20 @@ async def create_booking_request(
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
 
+    # 0. Validate datetime bounds
+    if data.end_dt <= data.start_dt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking end time must be strictly after start time",
+        )
+    
+    duration_days = max(1, (data.end_dt - data.start_dt).days)
+    if resource.max_booking_days and duration_days > resource.max_booking_days:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Requested duration ({duration_days} days) exceeds the maximum allowed ({resource.max_booking_days} days)",
+        )
+
     # 1. Check eligibility
     eligibility = await check_eligibility(resource_id, user, db)
     if not eligibility.eligible:
@@ -112,7 +126,18 @@ async def approve_booking(booking_id: uuid.UUID, owner_id: uuid.UUID, db: AsyncS
         raise HTTPException(status_code=403, detail="Only the resource owner can approve this booking")
 
     if booking.status != BookingStatus.PENDING_APPROVAL:
-        raise HTTPException(status_code=400, detail=f"Cannot approve booking in state {booking.status}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot approve booking in state {booking.status}",
+        )
+
+    # Recheck availability at approval time
+    is_avail = await check_availability(booking.resource_id, booking.start_dt, booking.end_dt, db)
+    if not is_avail:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot approve: Resource is already confirmed or active for this time window",
+        )
 
     prev_status = booking.status.value
     # Transition PENDING_APPROVAL -> APPROVED -> AWAITING_SIGNATURES
@@ -244,6 +269,85 @@ async def promote_waitlist(resource_id: uuid.UUID, released_window: tuple[dateti
             booking_id=None,
             db=db,
         )
+
+
+async def accept_waitlist_promotion(waitlist_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Booking:
+    """Accepts a promoted waitlist offer within 30 minutes and generates a booking."""
+    entry = await db.get(WaitlistEntry, waitlist_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Waitlist entry not found")
+    if entry.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only accept your own waitlist offer")
+    if not entry.notified_at:
+        raise HTTPException(status_code=400, detail="This waitlist entry has not been promoted yet")
+    
+    # 30-minute confirmation window
+    now = datetime.now(timezone.utc)
+    if (now - entry.notified_at.replace(tzinfo=timezone.utc)).total_seconds() > 1800:
+        await db.delete(entry)
+        await db.commit()
+        # Promote next in line
+        await promote_waitlist(entry.resource_id, (entry.requested_start, entry.requested_end), db)
+        raise HTTPException(status_code=400, detail="Promotion window expired (30 minutes exceeded)")
+
+    # Re-verify availability
+    is_avail = await check_availability(entry.resource_id, entry.requested_start, entry.requested_end, db)
+    if not is_avail:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slot is no longer available")
+
+    resource = await get_resource(entry.resource_id, db)
+    duration_days = max(1, (entry.requested_end - entry.requested_start).days)
+    total_amount = resource.daily_rate * duration_days
+
+    # Create confirmed/approved booking
+    booking = Booking(
+        resource_id=entry.resource_id,
+        user_id=user_id,
+        status=BookingStatus.AWAITING_SIGNATURES,
+        start_dt=entry.requested_start,
+        end_dt=entry.requested_end,
+        purpose="Accepted from waitlist promotion",
+        total_amount=total_amount,
+        deposit_amount=resource.deposit_amount,
+    )
+    db.add(booking)
+    await db.delete(entry)
+    await db.commit()
+    await db.refresh(booking)
+
+    await log_transition("WAITLIST_ACCEPTED", booking.id, user_id, None, BookingStatus.AWAITING_SIGNATURES.value, db)
+    await generate_contract(booking.id, db)
+    return booking
+
+
+async def decline_waitlist_promotion(waitlist_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession):
+    """Declines a promoted waitlist offer and promotes the next waiting user."""
+    entry = await db.get(WaitlistEntry, waitlist_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Waitlist entry not found")
+    if entry.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only decline your own waitlist offer")
+
+    resource_id = entry.resource_id
+    window = (entry.requested_start, entry.requested_end)
+    await db.delete(entry)
+    await db.commit()
+
+    # Recalculate remaining positions
+    rem_res = await db.execute(
+        select(WaitlistEntry)
+        .where(WaitlistEntry.resource_id == resource_id)
+        .order_by(WaitlistEntry.position.asc())
+    )
+    entries = rem_res.scalars().all()
+    for idx, e in enumerate(entries, start=1):
+        e.position = idx
+    await db.commit()
+
+    # Promote next
+    await promote_waitlist(resource_id, window, db)
+    return {"message": "Waitlist offer declined and next user notified"}
+
 
 
 async def get_booking(booking_id: uuid.UUID, requesting_user: User, db: AsyncSession) -> Booking:

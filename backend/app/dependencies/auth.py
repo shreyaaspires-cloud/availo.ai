@@ -63,3 +63,42 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
             detail="Admin role required",
         )
     return current_user
+
+
+async def get_booking_participant(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Validates that current_user is either:
+    1. The booking requester (user_id)
+    2. The resource owner (resource.owner_id)
+    3. An authorized ADMIN
+    Returns the loaded Booking instance. Raises HTTP 403 or 404.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.booking import Booking
+
+    result = await db.execute(
+        select(Booking)
+        .options(selectinload(Booking.resource), selectinload(Booking.user))
+        .where(Booking.id == booking_id)
+    )
+    booking = result.scalars().first()
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    is_booker = (booking.user_id == current_user.id)
+    is_owner = (booking.resource.owner_id == current_user.id)
+    is_admin = ("ADMIN" in current_user.roles)
+
+    if not (is_booker or is_owner or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to access this booking",
+        )
+
+    return booking
+

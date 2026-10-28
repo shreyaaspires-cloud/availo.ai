@@ -26,6 +26,14 @@ async def upload_condition_photo(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    booking = await get_booking_participant(booking_id, current_user, db)
+    # Only booker or owner may upload condition photos
+    is_booker = (booking.user_id == current_user.id)
+    is_owner = (booking.resource.owner_id == current_user.id)
+    if not (is_booker or is_owner or "ADMIN" in current_user.roles):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to submit condition photos")
+
     file_bytes = await file.read()
     return await condition_service.submit_condition_photos(
         booking_id=booking_id,
@@ -43,6 +51,10 @@ async def checkin_complete(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    booking = await get_booking_participant(booking_id, current_user, db)
+    if booking.user_id != current_user.id and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the booking user can complete check-in")
     return await condition_service.complete_checkin(booking_id, db)
 
 
@@ -52,6 +64,10 @@ async def checkout_complete(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    booking = await get_booking_participant(booking_id, current_user, db)
+    if booking.user_id != current_user.id and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the booking user can complete check-out")
     await condition_service.complete_checkout(booking_id, db)
     return {"message": "Checkout submitted. AI Damage analysis running."}
 
@@ -62,6 +78,8 @@ async def get_booking_conditions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    await get_booking_participant(booking_id, current_user, db)
     result = await db.execute(
         select(ConditionReport)
         .options(selectinload(ConditionReport.images))

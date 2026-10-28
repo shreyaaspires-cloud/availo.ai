@@ -25,6 +25,8 @@ async def get_contract_by_booking(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    await get_booking_participant(booking_id, current_user, db)
     result = await db.execute(
         select(Contract)
         .options(selectinload(Contract.signatures))

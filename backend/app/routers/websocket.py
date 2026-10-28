@@ -18,7 +18,7 @@ async def websocket_endpoint(
     try:
         payload = decode_token(token)
         token_sub = payload.get("sub")
-        if token_sub != user_id:
+        if not token_sub or token_sub != user_id:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
     except Exception:

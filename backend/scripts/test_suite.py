@@ -217,13 +217,41 @@ async def run_full_suite():
         assert final_status in ["COMPLETED", "DAMAGE_REVIEW"]
         print(f"✅ 20. Automated AI Inspection Pipeline: Final status -> {final_status} (Escrow Resolved)")
 
-        # 17. Audit Log integrity check
+        # 17. Security & Authorization Checks: Unrelated user cannot access booking or condition reports
+        reg_stranger = await client.post("/auth/register", json={
+            "email": "stranger@availo.app",
+            "password": "Stranger@Availo",
+            "full_name": "Stranger User",
+        })
+        assert reg_stranger.status_code == 201
+        stranger_token = (await client.post("/auth/login", json={"email": "stranger@availo.app", "password": "Stranger@Availo"})).json()["access_token"]
+        stranger_headers = {"Authorization": f"Bearer {stranger_token}"}
+        
+        # Stranger attempting to view booking
+        unauth_booking = await client.get(f"/bookings/{booking_id}", headers=stranger_headers)
+        assert unauth_booking.status_code == 403
+        
+        # Stranger attempting to view conditions
+        unauth_conditions = await client.get(f"/conditions/{booking_id}", headers=stranger_headers)
+        assert unauth_conditions.status_code == 403
+
+        # Booking validation: End before start rejected
+        invalid_times = await client.post("/bookings", headers=user_headers, json={
+            "resource_id": resource_id,
+            "start_dt": (now + timedelta(days=5)).isoformat(),
+            "end_dt": (now + timedelta(days=2)).isoformat(),
+            "purpose": "Invalid time window test",
+        })
+        assert invalid_times.status_code == 400
+        print("✅ 21. Security & Validation Suite: Unrelated user access blocked (403) and invalid datetime bounds rejected (400)")
+
+        # 18. Audit Log integrity check
         async with AsyncSessionLocal() as db:
             from app.models.audit_log import AuditLog
             from sqlalchemy import select, func
             audit_count = (await db.execute(select(func.count(AuditLog.id)).where(AuditLog.booking_id == uuid.UUID(booking_id)))).scalar()
             assert audit_count >= 5
-            print(f"✅ 21. Append-Only Audit Trail: Verified {audit_count} immutable transition entries logged")
+            print(f"✅ 22. Append-Only Audit Trail: Verified {audit_count} immutable transition entries logged")
 
         print("\n========================================================")
         print("🎉 ALL 21 TEST SUITE SPECIFICATIONS PASSED SUCCESSFULLY!")

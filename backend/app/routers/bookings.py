@@ -99,3 +99,23 @@ async def confirm_payment_endpoint(
     if not booking or booking.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to confirm payment for this booking")
     return await booking_service.confirm_payment(id, body.razorpay_payment_id, db)
+
+
+@router.post("/waitlist/{waitlist_id}/accept", response_model=BookingResponse)
+async def accept_waitlist_endpoint(
+    waitlist_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await booking_service.accept_waitlist_promotion(waitlist_id, current_user.id, db)
+
+
+@router.post("/waitlist/{waitlist_id}/decline")
+async def decline_waitlist_endpoint(
+    waitlist_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await booking_service.decline_waitlist_promotion(waitlist_id, current_user.id, db)
+
+

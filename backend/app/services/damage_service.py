@@ -87,6 +87,8 @@ async def analyze_damage(
 
     ai_result_dict: Optional[Dict[str, Any]] = None
 
+    ai_failed = False
+    ai_failure_reason = ""
     try:
         if settings.GEMINI_API_KEY and "dummy" not in settings.GEMINI_API_KEY:
             # Prepare image parts if real image URLs are active
@@ -98,9 +100,35 @@ async def analyze_damage(
             ai_result_dict = json.loads(cleaned)
     except Exception as e:
         logger.error("Gemini damage analysis exception: %s", e)
+        ai_failed = True
+        ai_failure_reason = str(e)
 
-    # Fallback to pristine match evaluation if Gemini API is in dummy mode
-    if not ai_result_dict:
+    # In mock/development mode, verify if all 6 pairs exist
+    missing_angles = [a.value for a in angles if a not in in_images or a not in out_images]
+    if missing_angles:
+        ai_failed = True
+        ai_failure_reason = f"Missing condition image pairs for angles: {', '.join(missing_angles)}"
+
+    if ai_failed:
+        pair_list = []
+        for angle in angles:
+            pair_list.append({
+                "angle": angle.value,
+                "match": False,
+                "confidence": 0.0,
+                "anomalies": ["AI inspection uncertain or offline; human review required"],
+                "closeup_required": False,
+                "before_image_url": in_images[angle].url if angle in in_images else "",
+                "after_image_url": out_images[angle].url if angle in out_images else "",
+            })
+        ai_result_dict = {
+            "pairs": pair_list,
+            "overall_damage_detected": True,  # Route to manual DAMAGE_REVIEW
+            "overall_confidence": 0.0,
+            "summary": f"Automated inspection could not verify intact condition: {ai_failure_reason or 'Manual review required'}.",
+        }
+    elif not ai_result_dict:
+        # Default mock evaluation when dummy keys active and pairs are intact
         pair_list = []
         for angle in angles:
             pair_list.append({

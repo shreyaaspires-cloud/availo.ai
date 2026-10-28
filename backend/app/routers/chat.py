@@ -18,6 +18,8 @@ async def get_booking_chat_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    await get_booking_participant(booking_id, current_user, db)
     return await chat_service.get_messages(booking_id, db)
 
 
@@ -28,6 +30,8 @@ async def post_chat_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.dependencies.auth import get_booking_participant
+    await get_booking_participant(booking_id, current_user, db)
     return await chat_service.send_message(
         booking_id=booking_id,
         sender_id=current_user.id,
