@@ -34,6 +34,27 @@ async def seed():
         # 1. Users
         users_data = [
             {
+                "email": "user@availo.app",
+                "password": "DemoUser@Availo",
+                "full_name": "Dr. Sarah Chen (Student/Researcher)",
+                "roles": ["USER"],
+                "trust_score": 87.0,
+            },
+            {
+                "email": "owner@availo.app",
+                "password": "DemoOwner@Availo",
+                "full_name": "Prof. Marcus Vance (Owner)",
+                "roles": ["USER", "OWNER"],
+                "trust_score": 95.0,
+            },
+            {
+                "email": "admin@availo.app",
+                "password": "DemoAdmin@Availo",
+                "full_name": "Availo Administrator",
+                "roles": ["USER", "OWNER", "ADMIN"],
+                "trust_score": 100.0,
+            },
+            {
                 "email": "demo_user@availo.app",
                 "password": settings.DEMO_USER_PASSWORD,
                 "full_name": "Demo User (Researcher)",
@@ -102,31 +123,40 @@ async def seed():
         demo_owner = users["demo_owner@availo.app"]
         resources_data = [
             {
+                "title": "Canon EOS R50 DSLR Kit",
+                "description": "Professional mirrorless 4K camera kit with dual lenses, microphone, and tripod for media projects.",
+                "category": "EQUIPMENT",
+                "deposit_amount": Decimal("2000.00"),
+                "daily_rate": Decimal("0.00"),
+                "requires_badge": [],
+                "location": "Media Lab, Room 102",
+            },
+            {
+                "title": "Bambu Lab P1S 3D Printer",
+                "description": "Enclosed high-speed coreXY 3D printer capable of multi-color prototyping and high-temperature filaments.",
+                "category": "EQUIPMENT",
+                "deposit_amount": Decimal("500.00"),
+                "daily_rate": Decimal("0.00"),
+                "requires_badge": ["TRAINING"],
+                "location": "Makerspace, Bay 3",
+            },
+            {
+                "title": "Seminar Room A (40 seats)",
+                "description": "Equipped executive presentation seminar room with dual 4K laser projectors and hybrid conference audio.",
+                "category": "SPACE",
+                "deposit_amount": Decimal("0.00"),
+                "daily_rate": Decimal("0.00"),
+                "requires_badge": [],
+                "location": "Admin Block, 2nd Floor",
+            },
+            {
                 "title": "Scanning Electron Microscope",
                 "description": "High-resolution SEM with energy-dispersive X-ray spectroscopy for advanced nanoscale analysis.",
-                "category": "LABORATORY_EQUIPMENT",
+                "category": "EQUIPMENT",
                 "deposit_amount": Decimal("5000.00"),
                 "daily_rate": Decimal("500.00"),
                 "requires_badge": ["RESEARCHER"],
                 "location": "Building A, Room 204",
-            },
-            {
-                "title": "Industrial 3D Printer",
-                "description": "High-precision SLA & SLS dual polymer 3D printer for engineering prototypes and rapid fabrication.",
-                "category": "FABRICATION",
-                "deposit_amount": Decimal("2000.00"),
-                "daily_rate": Decimal("200.00"),
-                "requires_badge": [],
-                "location": "Makerspace, Floor 1",
-            },
-            {
-                "title": "Canon EOS R5 Camera Kit",
-                "description": "Professional 8K full-frame mirrorless camera kit including RF 24-70mm f/2.8L and dual batteries.",
-                "category": "MEDIA",
-                "deposit_amount": Decimal("3000.00"),
-                "daily_rate": Decimal("300.00"),
-                "requires_badge": [],
-                "location": "Media Lab, Room 12",
             },
         ]
 
@@ -167,8 +197,8 @@ async def seed():
                 print(f"  - Resource already exists: {r_spec['title']}")
             resources[r_spec["title"]] = res
 
-        # 4. Completed Demo Booking for Canon EOS R5
-        camera_res = resources["Canon EOS R5 Camera Kit"]
+        # 4. Completed Demo Booking for Canon EOS R50
+        camera_res = resources.get("Canon EOS R50 DSLR Kit") or list(resources.values())[0]
         now = datetime.now(timezone.utc)
         yesterday = now - timedelta(days=2)
         today = now - timedelta(days=0)
