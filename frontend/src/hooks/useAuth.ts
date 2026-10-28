@@ -1,7 +1,7 @@
-import { useAuthStore } from "@/store/authStore"
+import { useAuthStore, ActiveRole } from "@/store/authStore"
 
 export function useAuth() {
-  const { user, token, roles, setUser, clearUser } = useAuthStore()
+  const { user, token, roles, activeRole, setUser, setActiveRole, clearUser } = useAuthStore()
 
   const isUser = roles.includes("USER")
   const isOwner = roles.includes("OWNER")
@@ -11,11 +11,13 @@ export function useAuth() {
     user,
     token,
     roles,
+    activeRole,
     isAuthenticated: !!token,
     isUser,
     isOwner,
     isAdmin,
     setUser,
+    setActiveRole,
     clearUser,
   }
 }

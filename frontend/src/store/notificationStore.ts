@@ -20,9 +20,15 @@ interface NotificationState {
 export const useNotificationStore = create<NotificationState>((set) => ({
   notifications: [],
   addNotification: (item) =>
-    set((state) => ({
-      notifications: [item, ...state.notifications],
-    })),
+    set((state) => {
+      // Prevent duplicate notification injection by ID
+      if (state.notifications.some((n) => n.id === item.id)) {
+        return state
+      }
+      return {
+        notifications: [item, ...state.notifications],
+      }
+    }),
   markRead: (id) =>
     set((state) => ({
       notifications: state.notifications.map((n) =>
