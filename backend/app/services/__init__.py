@@ -1,0 +1,31 @@
+from app.services import (
+    auth_service,
+    user_service,
+    resource_service,
+    booking_service,
+    condition_service,
+    damage_service,
+    contract_service,
+    incident_service,
+    chat_service,
+    notification_service,
+    fairuse_service,
+    audit_service,
+    gemini_service,
+)
+
+__all__ = [
+    "auth_service",
+    "user_service",
+    "resource_service",
+    "booking_service",
+    "condition_service",
+    "damage_service",
+    "contract_service",
+    "incident_service",
+    "chat_service",
+    "notification_service",
+    "fairuse_service",
+    "audit_service",
+    "gemini_service",
+]
