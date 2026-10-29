@@ -1,3 +1,5 @@
+"use client"
+
 import React, { useRef, useState } from "react"
 import SignatureCanvas from "react-signature-canvas"
 import { Button } from "@/components/ui/Button"

@@ -1,3 +1,5 @@
+"use client"
+
 import React, { useState, useEffect } from "react"
 import { useDropzone } from "react-dropzone"
 import { Camera, Check, UploadCloud, AlertCircle, Info, RefreshCw } from "lucide-react"
