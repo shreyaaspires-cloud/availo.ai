@@ -1,8 +1,10 @@
 import React, { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import { Alert } from "@/components/ui/Alert"
 import { Skeleton } from "@/components/ui/Skeleton"
+import toast from "react-hot-toast"
 import {
   ShieldCheck,
   AlertTriangle,
@@ -16,20 +18,89 @@ import {
   HelpCircle,
   Camera,
   Layers,
+  FileCheck,
+  DollarSign,
+  Wrench,
+  XCircle,
+  Send,
+  Lock,
 } from "lucide-react"
 
 interface DamageReportProps {
   bookingId: string
   bookingStatus?: string
+  isOwner?: boolean
+  onRefresh?: () => void
 }
 
-export const DamageReport: React.FC<DamageReportProps> = ({ bookingId, bookingStatus }) => {
+export const DamageReport: React.FC<DamageReportProps> = ({
+  bookingId,
+  bookingStatus,
+  isOwner,
+  onRefresh,
+}) => {
+  const queryClient = useQueryClient()
+  const { user } = useAuth()
   const { data: incident, isLoading } = useQuery<any>({
     queryKey: ["damage-assessment", bookingId],
     queryFn: () => api.get(`/incidents/${bookingId}/damage-assessment`),
   })
 
   const [activeDiffTab, setActiveDiffTab] = useState<Record<string, "original" | "diff">>({})
+
+  // Damage Claim Form State (for Owner)
+  const [showClaimForm, setShowClaimForm] = useState(false)
+  const [claimDesc, setClaimDesc] = useState("")
+  const [claimJustification, setClaimJustification] = useState("")
+  const [claimCost, setClaimCost] = useState("")
+  const [claimResolution, setClaimResolution] = useState("COMPENSATION")
+  const [claimAngles, setClaimAngles] = useState<string[]>([])
+
+  // Researcher Response State
+  const [respondAction, setRespondAction] = useState<"ACCEPT" | "COUNTER" | "DISPUTE">("ACCEPT")
+  const [respondNote, setRespondNote] = useState("")
+  const [respondCounterAmt, setRespondCounterAmt] = useState("")
+
+  // Submit Claim Mutation
+  const claimMutation = useMutation({
+    mutationFn: (payload: any) => api.post(`/incidents/${bookingId}/claims`, payload),
+    onSuccess: () => {
+      toast.success("Damage claim submitted to researcher")
+      setShowClaimForm(false)
+      queryClient.invalidateQueries({ queryKey: ["damage-assessment", bookingId] })
+      onRefresh?.()
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to submit damage claim")
+    },
+  })
+
+  // Respond Claim Mutation
+  const respondMutation = useMutation({
+    mutationFn: ({ claimId, payload }: { claimId: string; payload: any }) =>
+      api.post(`/incidents/claims/${claimId}/respond`, payload),
+    onSuccess: () => {
+      toast.success("Response recorded successfully")
+      queryClient.invalidateQueries({ queryKey: ["damage-assessment", bookingId] })
+      onRefresh?.()
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to record response")
+    },
+  })
+
+  // Close Contract Mutation
+  const closeContractMutation = useMutation({
+    mutationFn: () => api.post(`/incidents/${bookingId}/close-contract`),
+    onSuccess: () => {
+      toast.success("Contract successfully closed and deposit released!")
+      queryClient.invalidateQueries({ queryKey: ["damage-assessment", bookingId] })
+      onRefresh?.()
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Contract closure gate failed")
+    },
+  })
 
   if (isLoading) {
     return (
@@ -56,8 +127,9 @@ export const DamageReport: React.FC<DamageReportProps> = ({ bookingId, bookingSt
   }
 
   const assessments = incident.assessments || []
+  const claims = incident.claims || []
   const hasDamage = assessments.some(
-    (a: any) => (a.confidence_score >= 0.25 || !a.match || a.human_review_required)
+    (a: any) => a.confidence_score >= 0.25 || !a.match || a.human_review_required
   )
   const isResolved =
     incident.status === "RESOLVED" ||
@@ -66,6 +138,41 @@ export const DamageReport: React.FC<DamageReportProps> = ({ bookingId, bookingSt
     incident.status === "RESOLVED_SPLIT" ||
     bookingStatus?.startsWith("RESOLVED_") ||
     bookingStatus === "COMPLETED"
+
+  const activeClaim = claims.find(
+    (c: any) => c.status === "SUBMITTED" || c.status === "RESEARCHER_REVIEW" || c.status === "DISPUTED"
+  )
+
+  const handleClaimSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!claimDesc || !claimJustification) {
+      toast.error("Please fill in the claim description and justification")
+      return
+    }
+    claimMutation.mutate({
+      description: claimDesc,
+      justification: claimJustification,
+      estimated_cost: parseFloat(claimCost) || 0,
+      requested_resolution: claimResolution,
+      photo_angles: claimAngles,
+    })
+  }
+
+  const handleRespondSubmit = (claimId: string, e: React.FormEvent) => {
+    e.preventDefault()
+    if (!respondNote) {
+      toast.error("Please provide a note explaining your response")
+      return
+    }
+    respondMutation.mutate({
+      claimId,
+      payload: {
+        action: respondAction,
+        note: respondNote,
+        counter_amount: respondAction === "COUNTER" ? parseFloat(respondCounterAmt) || 0 : undefined,
+      },
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -88,6 +195,219 @@ export const DamageReport: React.FC<DamageReportProps> = ({ bookingId, bookingSt
         </Alert>
       )}
 
+      {/* Contract Closure Gate Action (When applicable) */}
+      {!isResolved && !hasDamage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+              <FileCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-emerald-950">Normal Contract Closure Gate</h4>
+              <p className="text-xs text-emerald-800">
+                All 6 angles inspected damage-free. Ready to verify obligations and close contract.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => closeContractMutation.mutate()}
+            disabled={closeContractMutation.isPending}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs shrink-0"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            {closeContractMutation.isPending ? "Verifying..." : "Verify & Close Contract"}
+          </button>
+        </div>
+      )}
+
+      {/* Active Damage Claim Banner / Action Bar */}
+      {activeClaim && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-xs uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              Active Damage Claim #{activeClaim.id.slice(0, 8)}
+            </span>
+            <span className="bg-amber-200 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+              {activeClaim.status.replace(/_/g, " ")}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <span className="text-amber-700 font-semibold block mb-0.5">Description:</span>
+              <p className="text-amber-950">{activeClaim.description}</p>
+            </div>
+            <div>
+              <span className="text-amber-700 font-semibold block mb-0.5">Resolution Requested:</span>
+              <p className="text-amber-950 font-bold">
+                {activeClaim.requested_resolution} — Est. Cost: ${activeClaim.estimated_cost}
+              </p>
+            </div>
+          </div>
+
+          {/* Researcher Response Form */}
+          {!isOwner && activeClaim.status === "RESEARCHER_REVIEW" && (
+            <form
+              onSubmit={(e) => handleRespondSubmit(activeClaim.id, e)}
+              className="pt-3 border-t border-amber-200 space-y-3"
+            >
+              <h5 className="font-bold text-xs text-amber-950">Researcher Response to Claim:</h5>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRespondAction("ACCEPT")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                    respondAction === "ACCEPT" ? "bg-emerald-600 text-white" : "bg-white text-slate-700 border"
+                  }`}
+                >
+                  Accept Claim
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRespondAction("COUNTER")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                    respondAction === "COUNTER" ? "bg-blue-600 text-white" : "bg-white text-slate-700 border"
+                  }`}
+                >
+                  Propose Counter-Offer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRespondAction("DISPUTE")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                    respondAction === "DISPUTE" ? "bg-rose-600 text-white" : "bg-white text-slate-700 border"
+                  }`}
+                >
+                  Dispute Claim
+                </button>
+              </div>
+
+              {respondAction === "COUNTER" && (
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Proposed Counter Amount ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={respondCounterAmt}
+                    onChange={(e) => setRespondCounterAmt(e.target.value)}
+                    className="w-full text-xs px-3 py-1.5 border rounded-lg"
+                    placeholder="e.g. 50.00"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Explanation & Supporting Evidence Note
+                </label>
+                <textarea
+                  value={respondNote}
+                  onChange={(e) => setRespondNote(e.target.value)}
+                  className="w-full text-xs p-2.5 border rounded-lg bg-white"
+                  placeholder="Explain why you accept, dispute, or counter this finding..."
+                  rows={2}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={respondMutation.isPending}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+              >
+                <Send className="w-3 h-3" />
+                Submit Response
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Owner Submit Claim Button / Form */}
+      {isOwner && hasDamage && !activeClaim && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-bold text-slate-900">Owner Damage Claim Action</h4>
+              <p className="text-xs text-slate-500">
+                AI flagged potential condition changes. You may submit an evidence-backed claim.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowClaimForm(!showClaimForm)}
+              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition"
+            >
+              {showClaimForm ? "Cancel" : "Submit Damage Claim"}
+            </button>
+          </div>
+
+          {showClaimForm && (
+            <form onSubmit={handleClaimSubmit} className="pt-3 border-t border-slate-100 space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Damage Description
+                </label>
+                <input
+                  type="text"
+                  value={claimDesc}
+                  onChange={(e) => setClaimDesc(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border rounded-lg"
+                  placeholder="e.g. Deep scratch on top casing and loose lens mount"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Requested Resolution
+                  </label>
+                  <select
+                    value={claimResolution}
+                    onChange={(e) => setClaimResolution(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border rounded-lg bg-white"
+                  >
+                    <option value="COMPENSATION">Direct Compensation</option>
+                    <option value="REPAIR">Borrower-Initiated Repair</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Estimated Cost ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={claimCost}
+                    onChange={(e) => setClaimCost(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border rounded-lg"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Justification (Why this occurred during booking)
+                </label>
+                <textarea
+                  value={claimJustification}
+                  onChange={(e) => setClaimJustification(e.target.value)}
+                  className="w-full text-xs p-2.5 border rounded-lg"
+                  placeholder="Cite check-in vs check-out photo evidence..."
+                  rows={2}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={claimMutation.isPending}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Submit Claim to Borrower
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       {/* Methodology & Limitations Notice */}
       <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-blue-900">
         <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
@@ -105,7 +425,7 @@ export const DamageReport: React.FC<DamageReportProps> = ({ bookingId, bookingSt
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {assessments.map((a: any) => {
           const isAnomaly =
-            (a.confidence_score >= 0.25 || !a.match || a.human_review_required)
+            a.confidence_score >= 0.25 || !a.match || a.human_review_required
           const currentTab = activeDiffTab[a.id] || (a.difference_image_url ? "diff" : "original")
 
           return (

@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from sqlalchemy import (
     Boolean,
@@ -8,6 +9,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Numeric,
     String,
     Text,
     func,
@@ -27,6 +29,23 @@ class IncidentStatus(str, enum.Enum):
     RESOLVED_OWNER = "RESOLVED_OWNER"
     RESOLVED_USER = "RESOLVED_USER"
     RESOLVED_SPLIT = "RESOLVED_SPLIT"
+
+
+class ClaimStatus(str, enum.Enum):
+    SUBMITTED = "SUBMITTED"
+    RESEARCHER_REVIEW = "RESEARCHER_REVIEW"
+    ACCEPTED = "ACCEPTED"
+    DISPUTED = "DISPUTED"
+    WITHDRAWN = "WITHDRAWN"
+    RESOLVED = "RESOLVED"
+
+
+class ClaimResolutionType(str, enum.Enum):
+    REPAIR = "REPAIR"
+    COMPENSATION = "COMPENSATION"
+    WITHDRAWN = "WITHDRAWN"
+    DISMISSED = "DISMISSED"
+    ARBITRATED = "ARBITRATED"
 
 
 class IncidentReport(Base):
@@ -70,9 +89,12 @@ class IncidentReport(Base):
 
     # Relationships
     booking: Mapped["Booking"] = relationship("Booking", back_populates="incident_report")
-    raised_by: Mapped["User"] = relationship("User")
+    raised_by: Mapped["User"] = relationship("User", foreign_keys=[raised_by_id])
     assessments: Mapped[List["DamageAssessment"]] = relationship(
         "DamageAssessment", back_populates="incident", cascade="all, delete-orphan"
+    )
+    claims: Mapped[List["DamageClaim"]] = relationship(
+        "DamageClaim", back_populates="incident", cascade="all, delete-orphan"
     )
 
 
@@ -120,3 +142,69 @@ class DamageAssessment(Base):
     )
 
     incident: Mapped["IncidentReport"] = relationship("IncidentReport", back_populates="assessments")
+
+
+class DamageClaim(Base):
+    __tablename__ = "damage_claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("incident_reports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    claimant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    photo_angles: Mapped[List[str]] = mapped_column(UniversalJSONB, default=list, nullable=False)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    estimated_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"), nullable=False)
+    invoice_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    requested_resolution: Mapped[ClaimResolutionType] = mapped_column(
+        Enum(ClaimResolutionType, name="claim_resolution_type_enum"),
+        default=ClaimResolutionType.COMPENSATION,
+        nullable=False,
+    )
+    status: Mapped[ClaimStatus] = mapped_column(
+        Enum(ClaimStatus, name="claim_status_enum"),
+        default=ClaimStatus.SUBMITTED,
+        nullable=False,
+    )
+
+    # Researcher Response
+    researcher_response: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # ACCEPT, COUNTER, DISPUTE
+    researcher_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    researcher_counter_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    researcher_evidence_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Repair Tracking
+    repair_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    repair_due_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    repair_evidence_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    repair_verified_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    repair_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Financial / Settlement Tracking
+    agreed_compensation: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    payment_reference: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    settled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    incident: Mapped["IncidentReport"] = relationship("IncidentReport", back_populates="claims")
+    claimant: Mapped["User"] = relationship("User", foreign_keys=[claimant_id])
