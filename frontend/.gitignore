@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.*
+.DS_Store
+node_modules/
+/.next/
+/.vite/
+/.pnp.*
+/pnpm-lock.yaml
+/vite.config.*
+/dist/
+/build/
+
+# VS Code
+.vscode/
+.idea/
+
+# Python virtual env
+venv/
