@@ -360,7 +360,7 @@ export default function BookingDetailPage() {
             booking.status === "DISPUTE_OPEN" ||
             booking.status.startsWith("RESOLVED_")) && (
             <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs">
-              <DamageReport bookingId={booking.id} bookingStatus={booking.status} />
+              <DamageReport bookingId={booking.id} bookingStatus={booking.status} isOwner={isResourceOwner} onRefresh={refetch} />
             </div>
           )}
         </div>

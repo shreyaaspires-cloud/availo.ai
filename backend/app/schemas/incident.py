@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
-from app.models.incident import IncidentStatus, ClaimStatus, ClaimResolutionType
+from app.models.incident import IncidentStatus, ClaimStatus, ClaimResolutionType, OwnerDecisionType
 from app.models.resource import ImageAngle
 
 
@@ -52,6 +52,11 @@ class DamageAssessmentResponse(BaseModel):
     bounding_boxes: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OwnerDecisionRequest(BaseModel):
+    decision: OwnerDecisionType
+    notes: Optional[str] = None
 
 
 class DamageClaimCreate(BaseModel):
@@ -120,6 +125,9 @@ class IncidentReportResponse(BaseModel):
     status: IncidentStatus
     resolution_note: Optional[str] = None
     resolved_at: Optional[datetime] = None
+    owner_decision: Optional[OwnerDecisionType] = None
+    owner_decision_at: Optional[datetime] = None
+    owner_decision_by_id: Optional[uuid.UUID] = None
     created_at: datetime
     assessments: List[DamageAssessmentResponse] = Field(default_factory=list)
     claims: List[DamageClaimResponse] = Field(default_factory=list)

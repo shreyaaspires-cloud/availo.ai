@@ -31,6 +31,11 @@ class IncidentStatus(str, enum.Enum):
     RESOLVED_SPLIT = "RESOLVED_SPLIT"
 
 
+class OwnerDecisionType(str, enum.Enum):
+    NO_DAMAGE_REPORTED = "NO_DAMAGE_REPORTED"
+    DAMAGE_REPORTED = "DAMAGE_REPORTED"
+
+
 class ClaimStatus(str, enum.Enum):
     SUBMITTED = "SUBMITTED"
     RESEARCHER_REVIEW = "RESEARCHER_REVIEW"
@@ -74,6 +79,13 @@ class IncidentReport(Base):
     )
     resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Owner Decision Fields
+    owner_decision: Mapped[Optional[OwnerDecisionType]] = mapped_column(
+        Enum(OwnerDecisionType, name="owner_decision_type_enum"), nullable=True
+    )
+    owner_decision_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    owner_decision_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

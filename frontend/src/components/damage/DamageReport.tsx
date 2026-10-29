@@ -6,6 +6,7 @@ import { api } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { Alert } from "@/components/ui/Alert"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog"
 import toast from "react-hot-toast"
 import {
   ShieldCheck,
@@ -26,6 +27,8 @@ import {
   XCircle,
   Send,
   Lock,
+  ThumbsUp,
+  Flag,
 } from "lucide-react"
 
 interface DamageReportProps {
@@ -50,8 +53,11 @@ export const DamageReport: React.FC<DamageReportProps> = ({
 
   const [activeDiffTab, setActiveDiffTab] = useState<Record<string, "original" | "diff">>({})
 
-  // Damage Claim Form State (for Owner)
+  // Modal Dialogs
+  const [showNoDamageConfirm, setShowNoDamageConfirm] = useState(false)
   const [showClaimForm, setShowClaimForm] = useState(false)
+
+  // Damage Claim Form State (for Owner)
   const [claimDesc, setClaimDesc] = useState("")
   const [claimJustification, setClaimJustification] = useState("")
   const [claimCost, setClaimCost] = useState("")
@@ -62,6 +68,25 @@ export const DamageReport: React.FC<DamageReportProps> = ({
   const [respondAction, setRespondAction] = useState<"ACCEPT" | "COUNTER" | "DISPUTE">("ACCEPT")
   const [respondNote, setRespondNote] = useState("")
   const [respondCounterAmt, setRespondCounterAmt] = useState("")
+
+  // Owner Decision Mutation (No Damage / Damage Reported)
+  const ownerDecisionMutation = useMutation({
+    mutationFn: (payload: { decision: "NO_DAMAGE_REPORTED" | "DAMAGE_REPORTED"; notes?: string }) =>
+      api.post(`/incidents/${bookingId}/owner-decision`, payload),
+    onSuccess: (data: any) => {
+      if (data.owner_decision === "NO_DAMAGE_REPORTED") {
+        toast.success("Return confirmed with No Damage. Agreement successfully closed!")
+      } else {
+        toast.success("Damage reported. Please submit claim details.")
+        setShowClaimForm(true)
+      }
+      queryClient.invalidateQueries({ queryKey: ["damage-assessment", bookingId] })
+      onRefresh?.()
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to submit owner decision")
+    },
+  })
 
   // Submit Claim Mutation
   const claimMutation = useMutation({
@@ -91,19 +116,6 @@ export const DamageReport: React.FC<DamageReportProps> = ({
     },
   })
 
-  // Close Contract Mutation
-  const closeContractMutation = useMutation({
-    mutationFn: () => api.post(`/incidents/${bookingId}/close-contract`),
-    onSuccess: () => {
-      toast.success("Contract successfully closed and deposit released!")
-      queryClient.invalidateQueries({ queryKey: ["damage-assessment", bookingId] })
-      onRefresh?.()
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "Contract closure gate failed")
-    },
-  })
-
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -130,9 +142,6 @@ export const DamageReport: React.FC<DamageReportProps> = ({
 
   const assessments = incident.assessments || []
   const claims = incident.claims || []
-  const hasDamage = assessments.some(
-    (a: any) => a.confidence_score >= 0.25 || !a.match || a.human_review_required
-  )
   const isResolved =
     incident.status === "RESOLVED" ||
     incident.status === "RESOLVED_USER" ||
@@ -179,48 +188,113 @@ export const DamageReport: React.FC<DamageReportProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner with Clear Human-Understandable Status */}
-      {incident.status === "UNDER_REVIEW" || incident.status === "OPEN" ? (
-        <Alert variant="warning" title="Possible change detected — Manual Review Required">
-          Explainable AI comparison flagged potential condition discrepancies or perspective shifts. The reservation is under owner/admin review. Escrow deposit remains held safely in escrow.
+      {incident.owner_decision === "NO_DAMAGE_REPORTED" || isResolved ? (
+        <Alert variant="success" title="Return Inspection Finalized — Agreement Closed">
+          The resource owner reviewed the 6-angle evidence and confirmed no reportable damage. The agreement is closed and the security deposit has been released to the borrower.
         </Alert>
-      ) : isResolved && !hasDamage ? (
-        <Alert variant="success" title="No obvious damage detected — Escrow Released">
-          The equipment was verified undamaged across all 6 canonical perspectives. Escrow deposit has been released to the borrower.
-        </Alert>
-      ) : isResolved && hasDamage ? (
-        <Alert variant="info" title="Arbitration Completed">
-          The condition report has been resolved. Note: {incident.resolution_note || "Settled by administrator"}.
+      ) : activeClaim ? (
+        <Alert variant="warning" title="Damage Claim Active — Awaiting Resolution">
+          The owner has reported damage and submitted a claim. The booking is in damage review. Deposit funds remain held safely in platform escrow until mutual resolution.
         </Alert>
       ) : (
-        <Alert variant="info" title="XAI Inspection Complete — Awaiting Verification">
-          Visual comparison completed. Human review pending for final escrow authorization.
+        <Alert variant="info" title="AI Inspection Complete — Awaiting Owner Decision">
+          Gemini Vision AI and the OpenCV XAI Engine have completed the 6-angle comparison. The resource owner must review the visual evidence and record the final condition decision.
         </Alert>
       )}
 
-      {/* Contract Closure Gate Action (When applicable) */}
-      {!isResolved && !hasDamage && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <FileCheck className="w-5 h-5" />
-            </div>
+      {/* Methodology & Limitations Notice */}
+      <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-blue-900">
+        <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="font-semibold text-blue-950">
+            Explainable AI (XAI) Assistive Analysis Framework
+          </p>
+          <p className="text-blue-800 leading-relaxed">
+            AI comparison provides visual probability metrics and localized difference heatmaps. <b>The AI never decides whether damage occurred</b>; the final determination belongs entirely to the authorized resource owner.
+          </p>
+        </div>
+      </div>
+
+      {/* EXPLICIT OWNER DECISION PANEL (PHASE 2 REQUIREMENT) */}
+      {isOwner && !isResolved && !activeClaim && (
+        <div className="bg-white border-2 border-blue-600/30 rounded-2xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
             <div>
-              <h4 className="text-sm font-bold text-emerald-950">Normal Contract Closure Gate</h4>
-              <p className="text-xs text-emerald-800">
-                All 6 angles inspected damage-free. Ready to verify obligations and close contract.
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-blue-600" />
+                Owner Decision
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Review the 6 canonical perspectives below, then record your official determination.
               </p>
             </div>
+            <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 bg-blue-50 text-blue-700 rounded-md border border-blue-200 self-start sm:self-auto">
+              Owner Action Required
+            </span>
           </div>
-          <button
-            onClick={() => closeContractMutation.mutate()}
-            disabled={closeContractMutation.isPending}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs shrink-0"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            {closeContractMutation.isPending ? "Verifying..." : "Verify & Close Contract"}
-          </button>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            {/* Button A: Report Damage */}
+            <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/40 space-y-3 flex flex-col justify-between">
+              <div className="space-y-1">
+                <span className="font-bold text-xs text-rose-950 flex items-center gap-1.5">
+                  <Flag className="w-4 h-4 text-rose-600" />
+                  Option 1: Report Suspected Damage
+                </span>
+                <p className="text-xs text-rose-800 leading-relaxed">
+                  Report a suspected issue, specify affected angles, and submit supporting evidence or repair quotations for researcher review.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClaimForm(true)}
+                disabled={ownerDecisionMutation.isPending}
+                className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs"
+              >
+                <AlertTriangle className="w-4 h-4" />
+                Report Damage
+              </button>
+            </div>
+
+            {/* Button B: No Damage — Close Agreement */}
+            <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-3 flex flex-col justify-between">
+              <div className="space-y-1">
+                <span className="font-bold text-xs text-emerald-950 flex items-center gap-1.5">
+                  <ThumbsUp className="w-4 h-4 text-emerald-600" />
+                  Option 2: Confirm No Damage
+                </span>
+                <p className="text-xs text-emerald-800 leading-relaxed">
+                  Confirm that you are not reporting damage. This records your decision and safely executes the contract closure gate and deposit release.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNoDamageConfirm(true)}
+                disabled={ownerDecisionMutation.isPending}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                No Damage — Close Agreement
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for No Damage */}
+      <ConfirmationDialog
+        isOpen={showNoDamageConfirm}
+        title="Confirm Return & Close Agreement?"
+        description="You are confirming that you do not wish to report damage for this return. This will record your decision and begin the agreement closure process. Please verify the return evidence and outstanding obligations before proceeding."
+        confirmText="Confirm and Close Agreement"
+        cancelText="Cancel"
+        loading={ownerDecisionMutation.isPending}
+        onConfirm={() => {
+          setShowNoDamageConfirm(false)
+          ownerDecisionMutation.mutate({ decision: "NO_DAMAGE_REPORTED" })
+        }}
+        onCancel={() => setShowNoDamageConfirm(false)}
+      />
 
       {/* Active Damage Claim Banner / Action Bar */}
       {activeClaim && (
@@ -326,102 +400,87 @@ export const DamageReport: React.FC<DamageReportProps> = ({
         </div>
       )}
 
-      {/* Owner Submit Claim Button / Form */}
-      {isOwner && hasDamage && !activeClaim && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+      {/* Owner Submit Claim Modal Form */}
+      {isOwner && showClaimForm && (
+        <div className="bg-white border-2 border-rose-300 rounded-2xl p-5 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-900">Owner Damage Claim Action</h4>
+              <h4 className="text-sm font-bold text-slate-900">Submit Formal Damage Claim</h4>
               <p className="text-xs text-slate-500">
-                AI flagged potential condition changes. You may submit an evidence-backed claim.
+                Provide a factual description and repair estimate to initiate the resolution workflow.
               </p>
             </div>
             <button
-              onClick={() => setShowClaimForm(!showClaimForm)}
-              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition"
+              onClick={() => setShowClaimForm(false)}
+              className="text-xs text-slate-500 hover:text-slate-800 underline"
             >
-              {showClaimForm ? "Cancel" : "Submit Damage Claim"}
+              Cancel
             </button>
           </div>
 
-          {showClaimForm && (
-            <form onSubmit={handleClaimSubmit} className="pt-3 border-t border-slate-100 space-y-3">
+          <form onSubmit={handleClaimSubmit} className="pt-2 border-t border-slate-100 space-y-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                Damage Description *
+              </label>
+              <input
+                type="text"
+                value={claimDesc}
+                onChange={(e) => setClaimDesc(e.target.value)}
+                className="w-full text-xs px-3 py-2 border rounded-lg"
+                placeholder="e.g. Deep scratch on top casing and loose lens mount"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  Damage Description
+                  Requested Resolution *
+                </label>
+                <select
+                  value={claimResolution}
+                  onChange={(e) => setClaimResolution(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border rounded-lg bg-white"
+                >
+                  <option value="COMPENSATION">Direct Financial Compensation</option>
+                  <option value="REPAIR">Borrower-Initiated Repair</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Estimated Repair Cost ($)
                 </label>
                 <input
-                  type="text"
-                  value={claimDesc}
-                  onChange={(e) => setClaimDesc(e.target.value)}
+                  type="number"
+                  value={claimCost}
+                  onChange={(e) => setClaimCost(e.target.value)}
                   className="w-full text-xs px-3 py-2 border rounded-lg"
-                  placeholder="e.g. Deep scratch on top casing and loose lens mount"
+                  placeholder="0.00"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    Requested Resolution
-                  </label>
-                  <select
-                    value={claimResolution}
-                    onChange={(e) => setClaimResolution(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border rounded-lg bg-white"
-                  >
-                    <option value="COMPENSATION">Direct Compensation</option>
-                    <option value="REPAIR">Borrower-Initiated Repair</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    Estimated Cost ($)
-                  </label>
-                  <input
-                    type="number"
-                    value={claimCost}
-                    onChange={(e) => setClaimCost(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border rounded-lg"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  Justification (Why this occurred during booking)
-                </label>
-                <textarea
-                  value={claimJustification}
-                  onChange={(e) => setClaimJustification(e.target.value)}
-                  className="w-full text-xs p-2.5 border rounded-lg"
-                  placeholder="Cite check-in vs check-out photo evidence..."
-                  rows={2}
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={claimMutation.isPending}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Submit Claim to Borrower
-              </button>
-            </form>
-          )}
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                Justification (Why this occurred during booking) *
+              </label>
+              <textarea
+                value={claimJustification}
+                onChange={(e) => setClaimJustification(e.target.value)}
+                className="w-full text-xs p-2.5 border rounded-lg"
+                placeholder="Cite check-in vs check-out photo evidence..."
+                rows={2}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={claimMutation.isPending}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Submit Damage Claim
+            </button>
+          </form>
         </div>
       )}
-
-      {/* Methodology & Limitations Notice */}
-      <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-blue-900">
-        <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-semibold text-blue-950">
-            Explainable AI (XAI) Forensic Inspection Framework
-          </p>
-          <p className="text-blue-800 leading-relaxed">
-            Availo pairs high-resolution Gemini Vision inspection with localized computer-vision difference heatmaps. Similarity metrics reflect pixel distribution fidelity (L1 difference) and do not represent damage probability. Difference images are diagnostic visual aids, not proof of liability.
-          </p>
-        </div>
-      </div>
 
       {/* 6 Canonical Perspective Comparison Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

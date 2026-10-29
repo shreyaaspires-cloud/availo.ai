@@ -10,10 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.user import User
 from app.models.booking import Booking, BookingStatus
-from app.models.incident import IncidentReport, IncidentStatus, DamageClaim, ClaimStatus, ClaimResolutionType
+from app.models.incident import (
+    IncidentReport,
+    IncidentStatus,
+    DamageClaim,
+    ClaimStatus,
+    ClaimResolutionType,
+    OwnerDecisionType,
+)
 from app.schemas.incident import (
     IncidentReportResponse,
     DamageAssessmentResponse,
+    OwnerDecisionRequest,
     DamageClaimCreate,
     DamageClaimResponse,
     DamageClaimResponseRequest,
@@ -48,6 +56,102 @@ async def get_incident_damage_assessment(
     return incident
 
 
+@router.post("/{booking_id}/owner-decision", response_model=IncidentReportResponse)
+async def submit_owner_return_decision(
+    booking_id: uuid.UUID,
+    body: OwnerDecisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Owner Decision Endpoint:
+    Allows the authenticated resource owner to independently make the final condition decision:
+    1. NO_DAMAGE_REPORTED -> Marks decision, triggers contract closure gate and deposit release.
+    2. DAMAGE_REPORTED -> Moves case to owner damage claim initiation.
+    The AI model only provides probabilistic and visual advice; it NEVER decides.
+    """
+    booking = await get_booking_participant(booking_id, current_user, db)
+    if booking.resource.owner_id != current_user.id and "ADMIN" not in current_user.roles:
+        raise HTTPException(status_code=403, detail="Only the resource owner can record the condition return decision")
+
+    inc_res = await db.execute(
+        select(IncidentReport)
+        .options(selectinload(IncidentReport.claims), selectinload(IncidentReport.assessments))
+        .where(IncidentReport.booking_id == booking_id)
+    )
+    incident = inc_res.scalars().first()
+    if not incident:
+        incident = IncidentReport(
+            booking_id=booking_id,
+            raised_by_id=current_user.id,
+            status=IncidentStatus.OPEN,
+        )
+        db.add(incident)
+        await db.commit()
+        # Re-query with eager loads to prevent missing greenlet on relationship access
+        inc_res = await db.execute(
+            select(IncidentReport)
+            .options(selectinload(IncidentReport.claims), selectinload(IncidentReport.assessments))
+            .where(IncidentReport.id == incident.id)
+        )
+        incident = inc_res.scalars().first()
+
+    now = datetime.now(timezone.utc)
+    incident.owner_decision = body.decision
+    incident.owner_decision_at = now
+    incident.owner_decision_by_id = current_user.id
+    if body.notes:
+        incident.resolution_note = body.notes
+
+    if body.decision == OwnerDecisionType.NO_DAMAGE_REPORTED:
+        # Check that no unresolved active damage claim exists
+        for claim in getattr(incident, "claims", []):
+            if claim.status in [ClaimStatus.SUBMITTED, ClaimStatus.RESEARCHER_REVIEW, ClaimStatus.DISPUTED]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot confirm 'No Damage': Active damage claim is currently pending resolution",
+                )
+
+        incident.status = IncidentStatus.RESOLVED_USER
+        incident.resolved_at = now
+        await db.commit()
+
+        # Execute contract closure gate
+        await verify_and_close_contract(
+            booking_id=booking_id,
+            actor_id=current_user.id,
+            closure_reason=body.notes or "Owner confirmed No Damage — Normal Agreement Closure",
+            db=db,
+        )
+    else:
+        # DAMAGE_REPORTED
+        incident.status = IncidentStatus.OPEN
+        booking.status = BookingStatus.DAMAGE_REVIEW
+        await db.commit()
+
+        await log_transition(
+            action="OWNER_REPORTED_DAMAGE",
+            booking_id=booking_id,
+            user_id=current_user.id,
+            previous_status=booking.status.value,
+            new_status=BookingStatus.DAMAGE_REVIEW.value,
+            db=db,
+            metadata={"notes": body.notes},
+        )
+
+        await notify(
+            user_id=booking.user_id,
+            type="DAMAGE_REPORTED_BY_OWNER",
+            title="Owner Condition Decision: Suspected Damage",
+            body="The resource owner has reviewed return photos and flagged suspected damage for claim review.",
+            booking_id=booking_id,
+            db=db,
+        )
+
+    await db.refresh(incident)
+    return incident
+
+
 @router.post("/{booking_id}/claims", response_model=DamageClaimResponse)
 async def submit_owner_damage_claim(
     booking_id: uuid.UUID,
@@ -75,6 +179,11 @@ async def submit_owner_damage_claim(
         db.add(incident)
         await db.commit()
         await db.refresh(incident)
+
+    # Record that owner decided to report damage
+    incident.owner_decision = OwnerDecisionType.DAMAGE_REPORTED
+    incident.owner_decision_at = datetime.now(timezone.utc)
+    incident.owner_decision_by_id = current_user.id
 
     # Check for duplicate active claims
     for existing in getattr(incident, "claims", []):
@@ -175,7 +284,6 @@ async def respond_to_damage_claim(
     await db.refresh(claim)
 
     # Notify owner
-    resource_owner_id = booking.resource_id  # fetch owner
     b_full = (await db.execute(select(Booking).options(selectinload(Booking.resource)).where(Booking.id == booking.id))).scalars().first()
     if b_full and b_full.resource:
         await notify(
