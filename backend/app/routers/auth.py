@@ -26,7 +26,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/15minute")
+@limiter.limit("100/15minute")
 async def login(
     request: Request,
     response: Response,

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { useAuthStore } from "@/store/authStore"
 
 export type BookingStatus =
   | "DRAFT"
@@ -37,9 +38,14 @@ export interface BookingItem {
 }
 
 export function useBookings() {
+  const token =
+    useAuthStore.getState().token ||
+    (typeof window !== "undefined" ? localStorage.getItem("availo_token") : null)
+
   return useQuery<BookingItem[]>({
     queryKey: ["bookings"],
     queryFn: () => api.get("/bookings"),
+    enabled: !!token,
     staleTime: 10000,
   })
 }

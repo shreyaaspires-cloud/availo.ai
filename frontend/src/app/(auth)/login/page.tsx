@@ -20,9 +20,9 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const data: any = await api.post("/auth/login", { email, password })
-      // Fetch me
       localStorage.setItem("availo_token", data.access_token)
-      const me: any = await api.get("/auth/me")
+      // Fetch me with explicit Authorization header so it cannot race
+      const me: any = await api.get("/auth/me", undefined)
       setUser(me, data.access_token)
       toast.success(`Welcome back, ${me.full_name}!`)
       router.push("/resources")

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { useAuthStore } from "@/store/authStore"
 
 export interface ResourceImage {
   id: string
@@ -53,10 +54,14 @@ export function useResource(id: string) {
 }
 
 export function useResourceEligibility(id: string) {
+  const token =
+    useAuthStore.getState().token ||
+    (typeof window !== "undefined" ? localStorage.getItem("availo_token") : null)
+
   return useQuery<{ eligible: boolean; missing_badges: string[]; reason: string }>({
     queryKey: ["resource-eligibility", id],
     queryFn: () => api.get(`/resources/${id}/eligibility`),
-    enabled: !!id,
+    enabled: !!id && !!token,
   })
 }
 

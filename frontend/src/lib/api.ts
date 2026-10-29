@@ -8,7 +8,9 @@ interface RequestOptions extends RequestInit {
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { params, headers, ...rest } = options
-  const token = useAuthStore.getState().token
+  const token =
+    useAuthStore.getState().token ||
+    (typeof window !== "undefined" ? localStorage.getItem("availo_token") : null)
 
   let url = `${BASE_URL}${endpoint}`
   if (params) {
@@ -69,8 +71,19 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   }
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({ detail: "Request failed" }))
-    throw new Error(err.detail || "Request failed")
+    let errorMsg = `Request failed (${response.status})`
+    try {
+      const err = await response.json()
+      if (err.detail) {
+        errorMsg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail)
+      } else if (err.error) {
+        errorMsg = err.error
+      }
+    } catch {
+      const text = await response.text().catch(() => "")
+      if (text) errorMsg = text
+    }
+    throw new Error(errorMsg)
   }
 
   return response.json()
