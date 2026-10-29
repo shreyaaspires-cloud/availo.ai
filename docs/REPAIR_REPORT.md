@@ -17,3 +17,4 @@
 - `frontend build`: Compiled successfully across all 11 routes (`/`, `/login`, `/register`, `/resources`, `/resources/[id]`, `/bookings`, `/bookings/[id]`, `/dashboard`, `/admin`, `/notifications`).
 - `backend import & startup`: Verified clean startup with Uvicorn on port 8000.
 - `6-angle photo upload test`: Verified end-to-end with `backend/scripts/test_condition_upload.py`, successfully uploading and serving all 6 canonical angles with HTTP 200 responses.
+

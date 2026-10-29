@@ -38,3 +38,4 @@ Login at `http://localhost:3000/login` with any of the seeded personas:
    - Email: `demo_admin@availo.app`
    - Password: `DemoAdmin@Availo`
    - Capabilities: View system audit logs, dispute cases, platform-wide trust scores, and manage user roles.
+
