@@ -22,6 +22,11 @@ import {
 } from "lucide-react"
 
 export default function DashboardPage() {
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const { user, isOwner, isAdmin, activeRole, setActiveRole } = useAuth()
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings()
   const { data: resources = [], isLoading: resourcesLoading } = useResources()
@@ -124,7 +129,7 @@ export default function DashboardPage() {
       )}
 
       {/* USER / BORROWER DASHBOARD VIEW */}
-      {activeRole === "USER" && (
+      {mounted && activeRole === "USER" && (
         <div className="space-y-6">
           {/* Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -234,7 +239,7 @@ export default function DashboardPage() {
       )}
 
       {/* OWNER DASHBOARD VIEW */}
-      {activeRole === "OWNER" && (
+      {mounted && activeRole === "OWNER" && (
         <div className="space-y-6">
           {/* Owner Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

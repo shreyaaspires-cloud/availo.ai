@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useNotificationStore } from "@/store/notificationStore"
@@ -11,6 +11,11 @@ import Link from "next/link"
 import { Bell, CheckCheck, ExternalLink, Calendar, ShieldCheck, AlertTriangle } from "lucide-react"
 
 export default function NotificationsPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const queryClient = useQueryClient()
   const { setNotifications } = useNotificationStore()
 
@@ -51,7 +56,7 @@ export default function NotificationsPage() {
       </div>
 
       {/* List */}
-      {isLoading ? (
+      {!mounted || isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3, 4].map((n) => (
             <div key={n} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-2">

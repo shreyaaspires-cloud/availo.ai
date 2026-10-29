@@ -9,6 +9,11 @@ import { Button } from "@/components/ui/Button"
 import { Search, SlidersHorizontal, RotateCcw, Box } from "lucide-react"
 
 export default function ResourcesPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const [searchInput, setSearchInput] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [category, setCategory] = useState("")
@@ -152,7 +157,7 @@ export default function ResourcesPage() {
             )}
           </div>
 
-          {isLoading ? (
+          {!mounted || isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {[1, 2, 3, 4, 5, 6].map((n) => (
                 <div key={n} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">

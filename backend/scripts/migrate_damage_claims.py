@@ -37,3 +37,4 @@ CREATE TABLE IF NOT EXISTS damage_claims (
 print("Created damage_claims table successfully")
 conn.commit()
 conn.close()
+

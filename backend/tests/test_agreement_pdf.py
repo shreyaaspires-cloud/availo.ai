@@ -8,3 +8,4 @@ from app.main import app
 async def test_pdf_generation_and_contract_download():
     """Validates that booking agreement PDF can be generated and downloaded."""
     pass
+

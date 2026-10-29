@@ -38,3 +38,8 @@ pnpm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Uploaded test artifacts & local uploads
+backend/uploads/
+*.tsbuildinfo
+

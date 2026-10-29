@@ -29,6 +29,8 @@ import {
   Lock,
   ThumbsUp,
   Flag,
+  Download,
+  Loader2,
 } from "lucide-react"
 
 interface DamageReportProps {
@@ -56,6 +58,37 @@ export const DamageReport: React.FC<DamageReportProps> = ({
   // Modal Dialogs
   const [showNoDamageConfirm, setShowNoDamageConfirm] = useState(false)
   const [showClaimForm, setShowClaimForm] = useState(false)
+  const [downloadingReceipt, setDownloadingReceipt] = useState(false)
+
+  const handleDownloadReceipt = async () => {
+    try {
+      setDownloadingReceipt(true)
+      const token = typeof window !== "undefined" ? localStorage.getItem("availo_token") : null
+      const res = await fetch(`http://localhost:8000/api/v1/contracts/${bookingId}/receipt/pdf`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null)
+        throw new Error(errJson?.detail || "Failed to download settlement receipt")
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `Availo_Receipt_${bookingId.slice(0, 8)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      toast.success("Settlement PDF Receipt downloaded successfully")
+    } catch (err: any) {
+      toast.error(err.message || "Failed to download receipt PDF")
+    } finally {
+      setDownloadingReceipt(false)
+    }
+  }
 
   // Damage Claim Form State (for Owner)
   const [claimDesc, setClaimDesc] = useState("")
@@ -189,9 +222,28 @@ export const DamageReport: React.FC<DamageReportProps> = ({
     <div className="space-y-6">
       {/* Top Banner with Clear Human-Understandable Status */}
       {incident.owner_decision === "NO_DAMAGE_REPORTED" || isResolved ? (
-        <Alert variant="success" title="Return Inspection Finalized — Agreement Closed">
-          The resource owner reviewed the 6-angle evidence and confirmed no reportable damage. The agreement is closed and the security deposit has been released to the borrower.
-        </Alert>
+        <div className="space-y-3">
+          <Alert variant="success" title="Return Inspection Finalized — Agreement Closed">
+            The resource owner reviewed the 6-angle evidence and confirmed agreement closure. The agreement is formally closed and escrow reconciliation has been executed in the platform ledger.
+          </Alert>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-emerald-950 block">Official Settlement Receipt Available</span>
+                <span className="text-[11px] text-emerald-700 block">Download the verifiable PDF receipt including persisted terms, timestamps, and escrow release details.</span>
+              </div>
+            </div>
+            <button
+              onClick={handleDownloadReceipt}
+              disabled={downloadingReceipt}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition self-start sm:self-auto shrink-0"
+            >
+              {downloadingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Download PDF Receipt
+            </button>
+          </div>
+        </div>
       ) : activeClaim ? (
         <Alert variant="warning" title="Damage Claim Active — Awaiting Resolution">
           The owner has reported damage and submitted a claim. The booking is in damage review. Deposit funds remain held safely in platform escrow until mutual resolution.

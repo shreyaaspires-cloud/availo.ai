@@ -66,21 +66,25 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   useWebSocket()
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // Avoid SSR / client hydration mismatches by tracking mount state
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Close mobile menu on page transition
   useEffect(() => {
     setMobileMenuOpen(false)
   }, [pathname])
 
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
   const currentNav =
     activeRole === "ADMIN" ? ADMIN_NAV : activeRole === "OWNER" ? OWNER_NAV : USER_NAV
 
   const effectiveIsAuthenticated = mounted && isAuthenticated
+  const effectiveActiveRole = mounted ? activeRole : "USER"
+  const effectiveRoles = mounted ? roles : []
+  const effectiveUser = mounted ? user : null
 
   const handleLogout = () => {
     clearUser()
@@ -118,7 +122,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
           {/* Center: Contextual Breadcrumb */}
           <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-500">
-            <span className="capitalize">{activeRole.toLowerCase()}</span>
+            <span className="capitalize">{effectiveActiveRole.toLowerCase()}</span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
             <span className="font-semibold text-slate-800">
               {pathname === "/"
@@ -130,8 +134,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 : pathname.startsWith("/admin")
                 ? "Admin Portal"
                 : pathname.startsWith("/dashboard")
-                ? "Dashboard"
-                : pathname.slice(1)}
+                ? "Management Hub"
+                : pathname.startsWith("/notifications")
+                ? "Notifications"
+                : "Portal"}
             </span>
           </div>
 
@@ -140,13 +146,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             {effectiveIsAuthenticated ? (
               <>
                 {/* Role Switcher if user has multiple roles */}
-                {roles.length > 1 && (
+                {effectiveRoles.length > 1 && (
                   <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
-                    {roles.includes("USER") && (
+                    {effectiveRoles.includes("USER") && (
                       <button
                         onClick={() => setActiveRole("USER")}
                         className={`px-2 py-1 rounded-md transition ${
-                          activeRole === "USER"
+                          effectiveActiveRole === "USER"
                             ? "bg-white text-slate-900 shadow-xs"
                             : "text-slate-600 hover:text-slate-900"
                         }`}
@@ -154,11 +160,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         User
                       </button>
                     )}
-                    {roles.includes("OWNER") && (
+                    {effectiveRoles.includes("OWNER") && (
                       <button
                         onClick={() => setActiveRole("OWNER")}
                         className={`px-2 py-1 rounded-md transition ${
-                          activeRole === "OWNER"
+                          effectiveActiveRole === "OWNER"
                             ? "bg-white text-slate-900 shadow-xs"
                             : "text-slate-600 hover:text-slate-900"
                         }`}
@@ -166,11 +172,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         Owner
                       </button>
                     )}
-                    {roles.includes("ADMIN") && (
+                    {effectiveRoles.includes("ADMIN") && (
                       <button
                         onClick={() => setActiveRole("ADMIN")}
                         className={`px-2 py-1 rounded-md transition ${
-                          activeRole === "ADMIN"
+                          effectiveActiveRole === "ADMIN"
                             ? "bg-white text-purple-700 shadow-xs"
                             : "text-slate-600 hover:text-purple-700"
                         }`}
@@ -181,30 +187,27 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </div>
                 )}
 
-                {/* Notifications Link */}
+                {/* Notifications Bell */}
                 <Link
                   href="/notifications"
                   className="relative p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition"
                   aria-label="Notifications"
                 >
-                  <Bell className="w-4 h-4" />
+                  <Bell className="w-5 h-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                   )}
                 </Link>
 
-                {/* User menu pill */}
+                {/* User Pill & Sign Out */}
                 <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-                  <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">
-                    {user?.full_name?.charAt(0) || "U"}
-                  </div>
-                  <div className="hidden xl:block text-left">
-                    <div className="text-xs font-semibold text-slate-800 line-clamp-1">
-                      {user?.full_name}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-medium">
-                      Trust {user?.trust_score ?? 100}/100
-                    </div>
+                  <div className="hidden sm:flex flex-col text-right">
+                    <span className="text-xs font-semibold text-slate-900 truncate max-w-[120px]">
+                      {effectiveUser?.full_name || "User"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 capitalize">
+                      {effectiveActiveRole.toLowerCase()}
+                    </span>
                   </div>
                   <button
                     onClick={handleLogout}
@@ -216,7 +219,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </button>
                 </div>
               </>
-            ) : (
+            ) : mounted ? (
               <div className="flex items-center gap-2">
                 <Link
                   href="/login"
@@ -231,7 +234,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   Register
                 </Link>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </header>
@@ -249,7 +252,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                     Active Workspace
                   </span>
                   <span className="text-xs font-bold text-slate-800">
-                    {activeRole} Mode
+                    {effectiveActiveRole} Mode
                   </span>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -262,11 +265,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   const isActive =
                     pathname === item.href ||
                     (item.href !== "/" && pathname.startsWith(item.href) && item.href !== "/dashboard")
+
                   return (
                     <Link
                       key={item.label}
                       href={item.href}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition ${
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition ${
                         isActive
                           ? "bg-blue-50 text-blue-700 font-semibold"
                           : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
@@ -283,12 +287,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <div className="pt-4 border-t border-slate-100 px-2 space-y-2">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-slate-500">Platform Trust Score</span>
-                  <span className="font-bold text-slate-900">{user?.trust_score ?? 100} / 100</span>
+                  <span className="font-bold text-slate-900">{effectiveUser?.trust_score ?? 100} / 100</span>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-emerald-500 h-full rounded-full transition-all"
-                    style={{ width: `${Math.min(100, user?.trust_score ?? 100)}%` }}
+                    style={{ width: `${Math.min(100, effectiveUser?.trust_score ?? 100)}%` }}
                   />
                 </div>
               </div>
@@ -297,7 +301,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         )}
 
         {/* Mobile Navigation Drawer */}
-        {mobileMenuOpen && (
+        {mounted && mobileMenuOpen && (
           <div className="lg:hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex">
             <div className="bg-white w-72 h-full p-6 shadow-xl flex flex-col justify-between">
               <div className="space-y-6">
@@ -316,46 +320,46 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </button>
                 </div>
 
-                {roles.length > 1 && (
+                {effectiveRoles.length > 1 && (
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Switch Role Mode
                     </span>
                     <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
-                      {roles.includes("USER") && (
+                      {effectiveRoles.includes("USER") && (
                         <button
                           onClick={() => {
                             setActiveRole("USER")
                             setMobileMenuOpen(false)
                           }}
                           className={`py-1 rounded text-center ${
-                            activeRole === "USER" ? "bg-white shadow-xs" : "text-slate-600"
+                            effectiveActiveRole === "USER" ? "bg-white shadow-xs" : "text-slate-600"
                           }`}
                         >
                           User
                         </button>
                       )}
-                      {roles.includes("OWNER") && (
+                      {effectiveRoles.includes("OWNER") && (
                         <button
                           onClick={() => {
                             setActiveRole("OWNER")
                             setMobileMenuOpen(false)
                           }}
                           className={`py-1 rounded text-center ${
-                            activeRole === "OWNER" ? "bg-white shadow-xs" : "text-slate-600"
+                            effectiveActiveRole === "OWNER" ? "bg-white shadow-xs" : "text-slate-600"
                           }`}
                         >
                           Owner
                         </button>
                       )}
-                      {roles.includes("ADMIN") && (
+                      {effectiveRoles.includes("ADMIN") && (
                         <button
                           onClick={() => {
                             setActiveRole("ADMIN")
                             setMobileMenuOpen(false)
                           }}
                           className={`py-1 rounded text-center ${
-                            activeRole === "ADMIN" ? "bg-white shadow-xs" : "text-slate-600"
+                            effectiveActiveRole === "ADMIN" ? "bg-white shadow-xs" : "text-slate-600"
                           }`}
                         >
                           Admin
@@ -388,7 +392,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 </nav>
               </div>
 
-              {isAuthenticated && (
+              {effectiveIsAuthenticated && (
                 <div className="pt-4 border-t border-slate-100">
                   <button
                     onClick={handleLogout}
@@ -411,7 +415,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-6 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-400">
-          Availo © 2026 · Institutional Resource Sharing with Cryptographic Agreements & Visual AI Inspection
+          Availo &copy; 2026 — Institutional Resource Sharing with Cryptographic Agreements & Visual AI Inspection
         </div>
       </footer>
     </div>

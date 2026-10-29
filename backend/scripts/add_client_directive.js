@@ -19,3 +19,4 @@ filesToPrefix.forEach(file => {
     }
   }
 });
+

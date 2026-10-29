@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import Link from "next/link"
 import { useBookings } from "@/hooks/useBooking"
 import { StateBadge } from "@/components/booking/StateBadge"
@@ -10,6 +10,11 @@ import { formatCurrency, formatDate } from "@/lib/utils"
 import { Calendar, ArrowRight, Compass, Filter } from "lucide-react"
 
 export default function BookingsListPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const { data: bookings = [], isLoading } = useBookings()
   const [filterTab, setFilterTab] = useState<"ALL" | "ACTIVE" | "COMPLETED" | "ACTION_REQUIRED">("ALL")
 
@@ -93,7 +98,7 @@ export default function BookingsListPage() {
       </div>
 
       {/* List */}
-      {isLoading ? (
+      {!mounted || isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((n) => (
             <div key={n} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">

@@ -32,3 +32,4 @@ pdf_content = pdf_res.read()
 assert len(pdf_content) > 1000, "PDF size is too small"
 assert pdf_content.startswith(b"%PDF"), "Response is not a valid PDF binary"
 print(f"SUCCESS: Downloaded valid PDF of size {len(pdf_content)} bytes")
+

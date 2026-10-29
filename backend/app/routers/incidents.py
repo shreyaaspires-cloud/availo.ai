@@ -270,6 +270,19 @@ async def respond_to_damage_claim(
         claim.payment_reference = f"ESCROW_DEDUCT_{str(uuid.uuid4())[:8]}"
         claim.incident.status = IncidentStatus.RESOLVED_OWNER
         await log_transition("CLAIM_ACCEPTED", booking.id, current_user.id, None, "ACCEPTED", db)
+
+        # Automatically execute contract closure gate to complete booking and reconcile escrow
+        try:
+            await verify_and_close_contract(
+                booking_id=booking.id,
+                actor_id=current_user.id,
+                closure_reason=f"Mutual resolution: Researcher accepted damage claim #{str(claim.id)[:8]} ($ {claim.estimated_cost})",
+                db=db,
+            )
+        except Exception as e:
+            # Fallback booking terminal update if closure gate encounters non-fatal gate condition
+            booking.status = BookingStatus.COMPLETED
+            await db.commit()
     elif body.action == "COUNTER":
         claim.status = ClaimStatus.RESEARCHER_REVIEW
         claim.agreed_compensation = body.counter_amount

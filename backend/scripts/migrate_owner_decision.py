@@ -19,3 +19,4 @@ for col_name, col_type in new_cols:
 conn.commit()
 conn.close()
 print('Migration complete')
+

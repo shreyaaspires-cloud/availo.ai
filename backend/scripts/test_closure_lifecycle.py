@@ -204,3 +204,4 @@ async def run_closure_lifecycle_tests():
 
 if __name__ == '__main__':
     asyncio.run(run_closure_lifecycle_tests())
+

@@ -46,7 +46,7 @@ async def verify_and_close_contract(
     if not contract:
         raise HTTPException(status_code=400, detail="Cannot close: No contract generated for booking")
 
-    if booking.status == BookingStatus.COMPLETED and contract.status == ContractStatus.VOIDED:
+    if booking.status == BookingStatus.COMPLETED and contract.status in [ContractStatus.SIGNED, ContractStatus.VOIDED]:
         return {
             "status": "ALREADY_CLOSED",
             "booking_id": booking.id,

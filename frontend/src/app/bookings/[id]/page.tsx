@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import {
@@ -38,6 +38,11 @@ import {
 import toast from "react-hot-toast"
 
 export default function BookingDetailPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const params = useParams()
   const id = params?.id as string
   const { user, isOwner: hasOwnerRole, isAdmin } = useAuth()
@@ -54,7 +59,7 @@ export default function BookingDetailPage() {
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
 
-  if (isLoading || !booking) {
+  if (!mounted || isLoading || !booking) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-24 w-full rounded-2xl" />
