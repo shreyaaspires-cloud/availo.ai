@@ -9,9 +9,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-from backend.app.core.config import settings
-from backend.app.repositories.agreement_repo import agreement_repo
-from backend.app.services.ai import ai_service
+from app.core.config import settings
+from app.repositories.agreement_repo import agreement_repo
+from app.services.ai import ai_service
 
 MANDATORY_CLAUSES = [
     "1. Purpose & Access: The resource shall be accessed and utilized exclusively for the academic, research, or approved project purposes stated in this application.",

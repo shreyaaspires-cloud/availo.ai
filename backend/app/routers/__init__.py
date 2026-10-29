@@ -3,13 +3,12 @@ from app.routers import (
     users,
     resources,
     bookings,
-    conditions,
-    contracts,
     incidents,
-    chat,
     notifications,
     admin,
-    websocket,
+    agreements,
+    inspections,
+    verification,
 )
 
 __all__ = [
@@ -17,11 +16,10 @@ __all__ = [
     "users",
     "resources",
     "bookings",
-    "conditions",
-    "contracts",
     "incidents",
-    "chat",
     "notifications",
     "admin",
-    "websocket",
+    "agreements",
+    "inspections",
+    "verification",
 ]
