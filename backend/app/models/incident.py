@@ -98,6 +98,21 @@ class DamageAssessment(Base):
     closeup_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     closeup_image_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
+    # Explainable AI (XAI) persisted columns
+    comparison_status: Mapped[str] = mapped_column(String(64), default="comparable", nullable=False)
+    similarity_metric: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    similarity_algorithm: Mapped[str] = mapped_column(
+        String(128), default="Normalized Grayscale L1 Pixel Difference", nullable=False
+    )
+    observed_differences: Mapped[List[str]] = mapped_column(UniversalJSONB, default=list, nullable=False)
+    damage_category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    location_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    supporting_evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    alternative_explanations: Mapped[List[str]] = mapped_column(UniversalJSONB, default=list, nullable=False)
+    human_review_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    difference_image_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    bounding_boxes: Mapped[List[Dict[str, Any]]] = mapped_column(UniversalJSONB, default=list, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
