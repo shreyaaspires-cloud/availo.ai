@@ -1,189 +1,114 @@
-from fastapi import APIRouter, HTTPException, status, Response, Request, Depends
-from typing import Dict, Any
-from datetime import datetime, timezone
+from datetime import timedelta
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.auth import RegisterRequest, LoginRequest, UserProfileResponse
-from app.repositories.user_repo import user_repo
-from app.repositories.credential_repo import credential_repo
-from app.repositories.audit_repo import audit_repo
-from app.core.security import get_password_hash, verify_password, create_access_token
-from app.core.config import settings
-from app.core.deps import get_current_user
+from app.database import get_db
+from app.models.user import User
+from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserResponse
+from app.services import auth_service, user_service
+from app.dependencies.auth import get_current_user
+from app.middleware.rate_limiter import limiter
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter()
 
-# In-memory rate limiting tracker: ip -> [timestamps]
-_login_attempts: Dict[str, list] = {}
 
-def check_login_rate_limit(ip: str):
-    now = datetime.now(timezone.utc).timestamp()
-    attempts = [t for t in _login_attempts.get(ip, []) if now - t < 60]
-    _login_attempts[ip] = attempts
-    if len(attempts) >= 10:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts. Please wait 1 minute before trying again."
-        )
-
-@router.post("/register", response_model=UserProfileResponse)
-async def register(req: RegisterRequest, response: Response, request: Request):
-    # Check duplicate email
-    existing_email = await user_repo.get_by_email(req.email)
-    if existing_email:
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    existing = await user_service.get_user_by_email(data.email, db)
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An account with this institutional email already exists."
+            detail="Email already registered",
         )
+    user = await user_service.create_user(data, db)
+    return user
 
-    # Check duplicate username
-    existing_username = await user_repo.get_by_username(req.username)
-    if existing_username:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This username is already taken. Please choose another."
-        )
 
-    user_dict = {
-        "email": req.email,
-        "username": req.username,
-        "password_hash": get_password_hash(req.password),
-        "full_name": req.full_name,
-        "dob": req.dob,
-        "academic_role": req.academic_role,
-        "department": req.department,
-        "system_role": "user",
-        "id_document_path": req.id_document_path,
-        "is_verified": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-
-    created_user = await user_repo.create(user_dict)
-
-    # Issue JWT token in httpOnly cookie
-    token = create_access_token(data={"sub": created_user["id"], "role": created_user["system_role"]})
-    response.set_cookie(
-        key=settings.COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=False, # Set to True in production HTTPS
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-    # Audit log
-    await audit_repo.log(
-        actor_id=created_user["id"],
-        actor_role="user",
-        action="user.register",
-        entity_type="user",
-        entity_id=created_user["id"],
-        after_state={"email": req.email, "username": req.username},
-        ip_address=request.client.host if request.client else "127.0.0.1"
-    )
-
-    return UserProfileResponse(
-        id=created_user["id"],
-        email=created_user["email"],
-        username=created_user["username"],
-        full_name=created_user["full_name"],
-        dob=created_user["dob"],
-        academic_role=created_user["academic_role"],
-        department=created_user["department"],
-        system_role=created_user["system_role"],
-        id_document_path=created_user.get("id_document_path"),
-        is_verified=created_user.get("is_verified", False),
-        credentials=[]
-    )
-
-@router.post("/login", response_model=UserProfileResponse)
-async def login(req: LoginRequest, response: Response, request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    check_login_rate_limit(client_ip)
-
-    # Allow login by email or username
-    user = await user_repo.get_by_email(req.identifier)
-    if not user:
-        user = await user_repo.get_by_username(req.identifier)
-
-    if not user or not verify_password(req.password, user.get("password_hash", "")):
-        _login_attempts.setdefault(client_ip, []).append(datetime.now(timezone.utc).timestamp())
+@router.post("/login", response_model=TokenResponse)
+@limiter.limit("100/15minute")
+async def login(
+    request: Request,
+    response: Response,
+    data: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    user = await user_service.get_user_by_email(data.email, db)
+    if not user or not auth_service.verify_password(data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username/email or password."
+            detail="Incorrect email or password",
         )
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive")
 
-    # Reset failed attempts on success
-    if client_ip in _login_attempts:
-        _login_attempts[client_ip] = []
+    payload = {"sub": str(user.id), "roles": user.roles}
+    access_token = auth_service.create_access_token(payload)
+    refresh_token = auth_service.create_refresh_token(payload)
 
-    # Issue JWT token
-    token = create_access_token(data={"sub": user["id"], "role": user.get("system_role", "user")})
+    # Set httpOnly cookie for refresh token
     response.set_cookie(
-        key=settings.COOKIE_NAME,
-        value=token,
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=False,  # Set to True in production with HTTPS
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        roles=user.roles,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    ref_token = request.cookies.get("refresh_token")
+    if not ref_token:
+        # Fallback check Authorization header if cookie is missing
+        auth_hdr = request.headers.get("Authorization")
+        if auth_hdr and auth_hdr.startswith("Bearer "):
+            ref_token = auth_hdr.split(" ")[1]
+
+    if not ref_token:
+        raise HTTPException(status_code=401, detail="Refresh token required")
+
+    payload = auth_service.decode_token(ref_token)
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    import uuid
+    user = await user_service.get_user_by_id(uuid.UUID(user_id_str), db)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    new_payload = {"sub": str(user.id), "roles": user.roles}
+    new_access = auth_service.create_access_token(new_payload)
+    new_refresh = auth_service.create_refresh_token(new_payload)
+
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh,
         httponly=True,
         samesite="lax",
         secure=False,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
 
-    # Fetch user's approved credentials
-    user_creds = await credential_repo.list_by_user(user["id"])
-    approved_creds = [c["credential_name"] for c in user_creds if c.get("status") == "approved"]
-
-    # Audit log
-    await audit_repo.log(
-        actor_id=user["id"],
-        actor_role=user.get("system_role", "user"),
-        action="user.login",
-        entity_type="user",
-        entity_id=user["id"],
-        ip_address=client_ip
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        roles=user.roles,
     )
 
-    return UserProfileResponse(
-        id=user["id"],
-        email=user["email"],
-        username=user["username"],
-        full_name=user["full_name"],
-        dob=user["dob"],
-        academic_role=user.get("academic_role", "Student"),
-        department=user.get("department", ""),
-        system_role=user.get("system_role", "user"),
-        id_document_path=user.get("id_document_path"),
-        is_verified=user.get("is_verified", False),
-        credentials=approved_creds
-    )
 
 @router.post("/logout")
-async def logout(response: Response, request: Request, current_user: dict = Depends(get_current_user)):
-    response.delete_cookie(key=settings.COOKIE_NAME)
-    await audit_repo.log(
-        actor_id=current_user["id"],
-        actor_role=current_user.get("system_role", "user"),
-        action="user.logout",
-        entity_type="user",
-        entity_id=current_user["id"],
-        ip_address=request.client.host if request.client else "127.0.0.1"
-    )
-    return {"message": "Logged out successfully."}
+async def logout(response: Response):
+    response.delete_cookie(key="refresh_token")
+    return {"message": "Successfully logged out"}
 
-@router.get("/me", response_model=UserProfileResponse)
-async def get_me(current_user: dict = Depends(get_current_user)):
-    user_creds = await credential_repo.list_by_user(current_user["id"])
-    approved_creds = [c["credential_name"] for c in user_creds if c.get("status") == "approved"]
 
-    return UserProfileResponse(
-        id=current_user["id"],
-        email=current_user["email"],
-        username=current_user["username"],
-        full_name=current_user["full_name"],
-        dob=current_user["dob"],
-        academic_role=current_user.get("academic_role", "Student"),
-        department=current_user.get("department", ""),
-        system_role=current_user.get("system_role", "user"),
-        id_document_path=current_user.get("id_document_path"),
-        is_verified=current_user.get("is_verified", False),
-        credentials=approved_creds
-    )
-
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user

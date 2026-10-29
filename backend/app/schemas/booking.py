@@ -1,47 +1,57 @@
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+import uuid
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
+from app.models.booking import BookingStatus
 
-class BookingCreateRequest(BaseModel):
-    resource_id: str
-    start_date: str # ISO string
-    end_date: str # ISO string
-    purpose: str
-    proof_files: List[str] = []
 
-class BookingStatusUpdateRequest(BaseModel):
-    status: str
-    rejection_reason: Optional[str] = None
+class BookingCreate(BaseModel):
+    resource_id: uuid.UUID
+    start_dt: datetime
+    end_dt: datetime
+    purpose: str = Field(default="", max_length=1000)
 
-class BookingCheckinRequest(BaseModel):
-    otp: str
 
-class BookingSignRequest(BaseModel):
-    signer_role: Optional[str] = None # Deprecated/ignored: role is derived from authenticated session
-    signature_data: str # Base64 or string
-    document_hash: str # SHA-256
+class BookingRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=2)
 
-class ApplicantInfo(BaseModel):
-    name: str
-    role: str
-    department: str
-    email: str
+
+class BookingPaymentConfirmRequest(BaseModel):
+    razorpay_payment_id: str = Field(..., min_length=2)
+
+
+class BookingCancelRequest(BaseModel):
+    reason: Optional[str] = None
+
 
 class BookingResponse(BaseModel):
-    id: str
-    resourceId: str
-    resource_name: Optional[str] = None
-    applicant: ApplicantInfo
-    isMine: bool
-    startDate: str
-    endDate: str
+    id: uuid.UUID
+    resource_id: uuid.UUID
+    user_id: uuid.UUID
+    status: BookingStatus
+    start_dt: datetime
+    end_dt: datetime
     purpose: str
-    status: str
-    proofFiles: List[str] = []
-    rejectionReason: Optional[str] = None
-    userSignature: Optional[str] = None
-    ownerSignature: Optional[str] = None
-    otp: Optional[str] = None
-    ownerVerified: bool = False
-    pre: Optional[Dict[str, Any]] = None
-    post: Optional[Dict[str, Any]] = None
+    total_amount: Decimal
+    deposit_amount: Decimal
+    cancellation_reason: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    payment_reference: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WaitlistEntryResponse(BaseModel):
+    id: uuid.UUID
+    resource_id: uuid.UUID
+    user_id: uuid.UUID
+    requested_start: datetime
+    requested_end: datetime
+    position: int
+    notified_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

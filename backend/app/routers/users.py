@@ -1,78 +1,71 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict, Any
+import uuid
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.user import UserUpdateRequest
-from app.schemas.auth import UserProfileResponse
-from app.schemas.booking import BookingResponse
-from app.repositories.user_repo import user_repo
-from app.repositories.booking_repo import booking_repo
-from app.repositories.credential_repo import credential_repo
-from app.repositories.resource_repo import resource_repo
-from app.core.deps import get_current_user
+from app.database import get_db
+from app.models.user import User, VerificationBadge, BadgeStatus, BadgeType
+from app.schemas.user import (
+    BadgeApplyRequest,
+    VerificationBadgeResponse,
+    UserProfileResponse,
+)
+from app.dependencies.auth import get_current_user
+from app.services.gemini_service import prescreen_verification_document
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter()
 
-@router.patch("/me", response_model=UserProfileResponse)
-async def update_profile(req: UserUpdateRequest, current_user: dict = Depends(get_current_user)):
-    updates = {}
-    if req.full_name is not None:
-        updates["full_name"] = req.full_name
-    if req.dob is not None:
-        updates["dob"] = req.dob
-    if req.department is not None:
-        updates["department"] = req.department
-    if req.academic_role is not None:
-        updates["academic_role"] = req.academic_role
 
-    updated = await user_repo.update(current_user["id"], updates)
-    user_creds = await credential_repo.list_by_user(current_user["id"])
-    approved_creds = [c["credential_name"] for c in user_creds if c.get("status") == "approved"]
-
+@router.get("/me", response_model=UserProfileResponse)
+async def get_my_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    badges_res = await db.execute(
+        select(VerificationBadge).where(VerificationBadge.user_id == current_user.id)
+    )
+    badges = list(badges_res.scalars().all())
     return UserProfileResponse(
-        id=updated["id"],
-        email=updated["email"],
-        username=updated["username"],
-        full_name=updated["full_name"],
-        dob=updated["dob"],
-        academic_role=updated.get("academic_role", "Student"),
-        department=updated.get("department", ""),
-        system_role=updated.get("system_role", "user"),
-        id_document_path=updated.get("id_document_path"),
-        is_verified=updated.get("is_verified", False),
-        credentials=approved_creds
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        roles=current_user.roles,
+        trust_score=current_user.trust_score,
+        is_active=current_user.is_active,
+        created_at=current_user.created_at,
+        badges=badges,
     )
 
-@router.get("/me/bookings")
-async def get_my_bookings(current_user: dict = Depends(get_current_user)):
-    bookings = await booking_repo.list_by_user(current_user["id"])
-    results = []
-    for b in bookings:
-        res = await resource_repo.get_by_id(b["resource_id"])
-        results.append({
-            "id": b["id"],
-            "resourceId": b["resource_id"],
-            "resource_name": res.get("name") if res else "Equipment",
-            "applicant": {
-                "name": current_user["full_name"],
-                "role": current_user.get("academic_role", "Student"),
-                "department": current_user.get("department", ""),
-                "email": current_user["email"]
-            },
-            "isMine": True,
-            "startDate": b["start_date"][:10],
-            "endDate": b["end_date"][:10],
-            "purpose": b["purpose"],
-            "status": b["status"],
-            "proofFiles": b.get("proof_files", []),
-            "rejectionReason": b.get("rejection_reason"),
-            "userSignature": "signed" if b.get("checked_in_at") or b.get("status") in ["signed", "active", "returned", "completed"] else None,
-            "ownerSignature": "signed" if b.get("status") in ["signed", "active", "returned", "completed"] else None,
-            "otp": b.get("checkin_otp"),
-            "ownerVerified": b.get("owner_verified", False)
-        })
-    return results
 
-@router.get("/me/credentials")
-async def get_my_credentials(current_user: dict = Depends(get_current_user)):
-    return await credential_repo.list_by_user(current_user["id"])
+@router.post("/me/badges/apply")
+async def apply_for_badge(
+    data: BadgeApplyRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Create VerificationBadge with PENDING status
+    badge = VerificationBadge(
+        user_id=current_user.id,
+        badge_type=data.badge_type,
+        document_url=data.document_url,
+        status=BadgeStatus.PENDING,
+    )
+    db.add(badge)
+    await db.commit()
+    await db.refresh(badge)
 
+    # Trigger prescreening as background task
+    async def run_prescreen(badge_id: uuid.UUID, doc_url: str, b_type: str):
+        prescreen_res = await prescreen_verification_document(doc_url, b_type)
+        # Note can be updated on the badge record if needed
+
+    background_tasks.add_task(
+        run_prescreen,
+        badge.id,
+        data.document_url,
+        data.badge_type.value,
+    )
+
+    return {"message": "Application submitted. Admin review within 24 hours.", "badge_id": badge.id}

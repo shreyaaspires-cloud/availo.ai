@@ -1,127 +1,152 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+from decimal import Decimal
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.resource import ResourceCreateRequest, ResourceUpdateRequest, ResourceResponse
-from app.repositories.resource_repo import resource_repo
-from app.repositories.booking_repo import booking_repo
-from app.core.deps import require_owner, get_current_user
+from app.database import get_db
+from app.models.user import User
+from app.models.resource import Resource, ResourceImage, ImageAngle
+from app.schemas.resource import (
+    ResourceCreate,
+    ResourceUpdate,
+    ResourceResponse,
+    ResourceFilter,
+    EligibilityResult,
+    ResourceImageResponse,
+    AvailabilitySlotResponse,
+)
+from app.dependencies.auth import get_current_user, require_owner
+from app.services import resource_service
+from app.storage.supabase_storage import upload_file
 
-router = APIRouter(prefix="/resources", tags=["Resources"])
+router = APIRouter()
+
 
 @router.get("", response_model=List[ResourceResponse])
 async def list_resources(
-    lat: Optional[float] = Query(None),
-    lng: Optional[float] = Query(None),
-    q: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    department: Optional[str] = Query(None),
-    radius_km: Optional[float] = Query(None)
+    location: Optional[str] = Query(None),
+    date_start: Optional[datetime] = Query(None),
+    date_end: Optional[datetime] = Query(None),
+    badge_required: Optional[str] = Query(None),
+    max_daily_rate: Optional[Decimal] = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
-    items = await resource_repo.list_all(
-        q=q,
+    filters = ResourceFilter(
+        search=search,
         category=category,
-        department=department,
-        lat=lat,
-        lng=lng,
-        radius_km=radius_km
+        location=location,
+        date_start=date_start,
+        date_end=date_end,
+        badge_required=badge_required,
+        max_daily_rate=max_daily_rate,
     )
+    return await resource_service.list_resources(filters, db)
 
-    responses = []
-    for r in items:
-        # Calculate dynamic bookedUntil and queue size
-        bookings = await booking_repo.list_by_resource(r["id"])
-        active_bookings = [b for b in bookings if b.get("status") in ["approved", "signed", "active"]]
-        active_bookings.sort(key=lambda x: x.get("end_date", ""), reverse=True)
-        booked_until = active_bookings[0]["end_date"][:10] if active_bookings else None
-        
-        waitlist = await booking_repo.get_waitlist_by_resource(r["id"])
 
-        responses.append(ResourceResponse(
-            id=r["id"],
-            name=r["name"],
-            department=r["department"],
-            category=r["category"],
-            owner_id=r["owner_id"],
-            owner_name=r.get("owner_name", "Lab Owner"),
-            location=r["location"],
-            building=r.get("building"),
-            floor=r.get("floor"),
-            latitude=r["latitude"],
-            longitude=r["longitude"],
-            image=r["image"],
-            description=r["description"],
-            condition=r["condition"],
-            criteria=r.get("criteria", []),
-            rules=r.get("rules", []),
-            approval_mode=r.get("approval_mode", "manual"),
-            opening_hours=r.get("opening_hours"),
-            bookedUntil=booked_until,
-            queue=len(waitlist),
-            distance_km=r.get("distance_km"),
-            is_active=r.get("is_active", True)
-        ))
-    return responses
+@router.post("", response_model=ResourceResponse, status_code=status.HTTP_201_CREATED)
+async def create_resource(
+    data: ResourceCreate,
+    current_user: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await resource_service.create_resource(current_user.id, data, db)
 
-@router.get("/{resource_id}", response_model=ResourceResponse)
-async def get_resource(resource_id: str):
-    r = await resource_repo.get_by_id(resource_id)
-    if not r:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
-    
-    bookings = await booking_repo.list_by_resource(resource_id)
-    active_bookings = [b for b in bookings if b.get("status") in ["approved", "signed", "active"]]
-    active_bookings.sort(key=lambda x: x.get("end_date", ""), reverse=True)
-    booked_until = active_bookings[0]["end_date"][:10] if active_bookings else None
-    waitlist = await booking_repo.get_waitlist_by_resource(resource_id)
 
-    return ResourceResponse(
-        id=r["id"],
-        name=r["name"],
-        department=r["department"],
-        category=r["category"],
-        owner_id=r["owner_id"],
-        owner_name=r.get("owner_name", "Lab Owner"),
-        location=r["location"],
-        building=r.get("building"),
-        floor=r.get("floor"),
-        latitude=r["latitude"],
-        longitude=r["longitude"],
-        image=r["image"],
-        description=r["description"],
-        condition=r["condition"],
-        criteria=r.get("criteria", []),
-        rules=r.get("rules", []),
-        approval_mode=r.get("approval_mode", "manual"),
-        opening_hours=r.get("opening_hours"),
-        bookedUntil=booked_until,
-        queue=len(waitlist),
-        is_active=r.get("is_active", True)
+@router.get("/{id}", response_model=ResourceResponse)
+async def get_resource_detail(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    resource = await resource_service.get_resource(id, db)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return resource
+
+
+@router.get("/{id}/eligibility", response_model=EligibilityResult)
+async def check_resource_eligibility(
+    id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await resource_service.check_eligibility(id, current_user, db)
+
+
+@router.patch("/{id}", response_model=ResourceResponse)
+async def update_resource(
+    id: uuid.UUID,
+    data: ResourceUpdate,
+    current_user: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await resource_service.update_resource(id, current_user.id, data, db)
+
+
+@router.delete("/{id}")
+async def delete_resource(
+    id: uuid.UUID,
+    current_user: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    await resource_service.delete_resource(id, current_user.id, db)
+    return {"message": "Resource deactivated successfully"}
+
+
+@router.get("/{id}/availability", response_model=List[AvailabilitySlotResponse])
+async def get_availability(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    resource = await resource_service.get_resource(id, db)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    # Return slots or simulated availability for the next 30 days
+    now = datetime.now(timezone.utc)
+    slots = []
+    for day in range(30):
+        start = now + timedelta(days=day)
+        end = start + timedelta(days=1)
+        avail = await resource_service.check_availability(id, start, end, db)
+        slots.append(
+            AvailabilitySlotResponse(
+                id=uuid.uuid4(),
+                start_dt=start,
+                end_dt=end,
+                is_blocked=not avail,
+            )
+        )
+    return slots
+
+
+@router.post("/{id}/images", response_model=ResourceImageResponse)
+async def upload_resource_image(
+    id: uuid.UUID,
+    file: UploadFile = File(...),
+    angle: ImageAngle = Form(ImageAngle.FRONT),
+    is_primary: bool = Form(False),
+    current_user: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    resource = await resource_service.get_resource(id, db)
+    if not resource or resource.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to add images for this resource")
+
+    contents = await file.read()
+    path = f"resources/{id}/{angle.value}_{file.filename}"
+    url = await upload_file(contents, "condition-photos", path, content_type=file.content_type or "image/jpeg")
+
+    img = ResourceImage(
+        resource_id=id,
+        url=url,
+        angle=angle,
+        is_primary=is_primary,
     )
-
-@router.post("", response_model=ResourceResponse)
-async def create_resource(req: ResourceCreateRequest, current_user: dict = Depends(require_owner)):
-    existing = await resource_repo.get_by_id(req.id)
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Resource ID already exists")
-
-    data = req.model_dump()
-    data["owner_id"] = current_user["id"]
-    data["owner_name"] = current_user["full_name"]
-    created = await resource_repo.create(data)
-
-    return ResourceResponse(**created)
-
-@router.patch("/{resource_id}", response_model=ResourceResponse)
-async def update_resource(resource_id: str, req: ResourceUpdateRequest, current_user: dict = Depends(require_owner)):
-    r = await resource_repo.get_by_id(resource_id)
-    if not r:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
-
-    if r["owner_id"] != current_user["id"] and current_user.get("system_role") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this resource.")
-
-    updates = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
-    updated = await resource_repo.update(resource_id, updates)
-    return ResourceResponse(**updated)
-
+    db.add(img)
+    await db.commit()
+    await db.refresh(img)
+    return img
