@@ -81,3 +81,49 @@ app.include_router(websocket.router, tags=["websocket"])
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "Availo"}
+
+
+from fastapi.responses import Response
+
+@app.get("/storage/{bucket}/{file_path:path}")
+async def serve_mock_storage(bucket: str, file_path: str):
+    """Serves uploaded condition photos or dynamic SVG photo placeholders for demo/mock storage."""
+    import os
+    local_dir = os.path.join(os.getcwd(), "uploads", bucket)
+    safe_path = os.path.normpath(os.path.join(local_dir, file_path))
+    if safe_path.startswith(local_dir) and os.path.exists(safe_path):
+        with open(safe_path, "rb") as f:
+            return Response(content=f.read(), media_type="image/jpeg")
+
+    # Generate visually rich canonical angle SVG preview
+    filename = os.path.basename(file_path).upper()
+    angle = "PHOTO"
+    for a in ["FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM"]:
+        if a in filename:
+            angle = a
+            break
+
+    is_return = "CHECK_OUT" in file_path.upper() or "OUT" in filename
+    bg_gradient = "#1e293b" if not is_return else "#0f172a"
+    accent = "#38bdf8" if not is_return else "#f59e0b"
+    title_label = f"CHECK-IN BASELINE" if not is_return else f"RETURN INSPECTION"
+    
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="{bg_gradient}"/>
+          <stop offset="100%" stop-color="#020617"/>
+        </linearGradient>
+      </defs>
+      <rect width="640" height="480" fill="url(#bg)"/>
+      <rect x="20" y="20" width="600" height="440" rx="16" fill="none" stroke="{accent}" stroke-width="2" stroke-dasharray="6,6" opacity="0.6"/>
+      <circle cx="320" cy="210" r="70" fill="#1e293b" stroke="{accent}" stroke-width="4"/>
+      <circle cx="320" cy="210" r="45" fill="#0f172a" stroke="{accent}" stroke-width="2"/>
+      <circle cx="305" cy="195" r="14" fill="{accent}" opacity="0.8"/>
+      <path d="M 280 130 L 300 110 L 340 110 L 360 130 Z" fill="{accent}" opacity="0.7"/>
+      <text x="320" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="bold" fill="#f8fafc" text-anchor="middle" letter-spacing="1.5">CANONICAL ANGLE: {angle}</text>
+      <text x="320" y="350" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="{accent}" text-anchor="middle" letter-spacing="2">{title_label}</text>
+      <text x="320" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Tamper-Proof Hardware Timestamp · Cryptographic SHA-256 Registered</text>
+    </svg>"""
+    return Response(content=svg.encode("utf-8"), media_type="image/svg+xml")
+

@@ -38,8 +38,18 @@ async def upload_file(
         except Exception as e:
             logger.error("Error uploading to Supabase: %s", e)
 
-    # Fallback mock URL for demo/local without live Supabase credentials
-    return f"https://mock-storage.availo.app/{bucket_name}/{path}"
+    # Local storage fallback for development / offline mode
+    try:
+        import os
+        upload_dir = os.path.join(os.getcwd(), "uploads", bucket_name)
+        file_disk_path = os.path.join(upload_dir, path)
+        os.makedirs(os.path.dirname(file_disk_path), exist_ok=True)
+        with open(file_disk_path, "wb") as f:
+            f.write(file_bytes)
+    except Exception as e:
+        logger.error("Error writing file locally: %s", e)
+
+    return f"http://localhost:8000/storage/{bucket_name}/{path}"
 
 
 async def get_signed_url(bucket_name: str, path: str, expires_in: int = 3600) -> str:

@@ -26,9 +26,16 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     }
   }
 
+  const isFormData = options.body instanceof FormData
+
   const reqHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(headers as Record<string, string>),
+  }
+
+  // Ensure Content-Type is completely omitted for FormData so fetch sets boundary
+  if (isFormData) {
+    delete reqHeaders["Content-Type"]
   }
 
   if (token) {

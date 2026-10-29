@@ -72,8 +72,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     setMobileMenuOpen(false)
   }, [pathname])
 
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const currentNav =
     activeRole === "ADMIN" ? ADMIN_NAV : activeRole === "OWNER" ? OWNER_NAV : USER_NAV
+
+  const effectiveIsAuthenticated = mounted && isAuthenticated
 
   const handleLogout = () => {
     clearUser()
@@ -130,7 +137,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
           {/* Right Header items */}
           <div className="flex items-center gap-3">
-            {isAuthenticated ? (
+            {effectiveIsAuthenticated ? (
               <>
                 {/* Role Switcher if user has multiple roles */}
                 {roles.length > 1 && (
@@ -232,7 +239,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Main Body Layout with Sidebar for Authenticated Users */}
       <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex gap-8">
         {/* Desktop Sidebar */}
-        {isAuthenticated && (
+        {effectiveIsAuthenticated && (
           <aside className="hidden lg:block w-64 shrink-0">
             <div className="sticky top-24 bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-6">
               {/* Role Indicator Banner */}

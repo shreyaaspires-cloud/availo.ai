@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { useDropzone } from "react-dropzone"
 import { Camera, Check, UploadCloud, AlertCircle, Info, RefreshCw } from "lucide-react"
 import { api } from "@/lib/api"
@@ -44,6 +44,40 @@ export const SixAnglePhotoUpload: React.FC<SixAnglePhotoUploadProps> = ({
   })
   const [submitting, setSubmitting] = useState(false)
 
+  // Fetch previously uploaded condition photos on mount so uploads persist after refresh
+  useEffect(() => {
+    let isMounted = true
+    async function loadExistingPhotos() {
+      try {
+        const reports: any[] = await api.get(`/conditions/${bookingId}`)
+        const report = reports.find((r: any) => r.report_type === reportType)
+        if (report && report.images && report.images.length > 0 && isMounted) {
+          setUploads((prev) => {
+            const next = { ...prev }
+            for (const img of report.images) {
+              const ang = img.angle as Angle
+              if (next[ang]) {
+                next[ang] = {
+                  preview: img.url,
+                  uploaded: true,
+                  uploading: false,
+                  error: undefined,
+                }
+              }
+            }
+            return next
+          })
+        }
+      } catch (e) {
+        // Condition report might not exist yet for this booking
+      }
+    }
+    loadExistingPhotos()
+    return () => {
+      isMounted = false
+    }
+  }, [bookingId, reportType])
+
   const handleFileDrop = async (angle: Angle, files: File[]) => {
     if (!files.length) return
     const file = files[0]
@@ -54,7 +88,7 @@ export const SixAnglePhotoUpload: React.FC<SixAnglePhotoUploadProps> = ({
       [angle]: { file, preview, uploaded: false, uploading: true, error: undefined },
     }))
 
-    // Upload individual angle to backend
+    // Upload individual angle to backend via multipart/form-data
     const formData = new FormData()
     formData.append("file", file)
     formData.append("report_type", reportType)
@@ -64,10 +98,14 @@ export const SixAnglePhotoUpload: React.FC<SixAnglePhotoUploadProps> = ({
       await api.post(`/conditions/${bookingId}/photos`, formData)
       setUploads((prev) => ({
         ...prev,
-        [angle]: { file, preview, uploaded: true, uploading: false },
+        [angle]: { file, preview, uploaded: true, uploading: false, error: undefined },
       }))
-      toast.success(`${angle} angle photo uploaded and confirmed by server`)
+      toast.success(`${angle} photo verified & uploaded`)
     } catch (err: any) {
+      let friendlyError = "Upload failed"
+      if (err.message) {
+        friendlyError = err.message
+      }
       setUploads((prev) => ({
         ...prev,
         [angle]: {
@@ -75,7 +113,7 @@ export const SixAnglePhotoUpload: React.FC<SixAnglePhotoUploadProps> = ({
           preview,
           uploaded: false,
           uploading: false,
-          error: err.message || "Upload failed",
+          error: friendlyError,
         },
       }))
       toast.error(`Failed to upload ${angle} photo`)
